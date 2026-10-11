@@ -15,6 +15,8 @@ import android.widget.MediaController
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.VideoView
+import java.io.File
+import dev.kotlinds.fluidsynthkmp.MidiFilePlayer
 
 class MainActivity : Activity() {
     private lateinit var statusText: TextView
@@ -24,6 +26,9 @@ class MainActivity : Activity() {
     private val queue = mutableListOf<String>()
     private var selectedSong: String? = null
     private var selectedUri: Uri? = null
+    private var midiPlayer: MidiFilePlayer? = null
+    private var selectedMidiName: String? = null
+    private var midiUri: Uri? = null
 
     private val colors = object {
         val background = Color.rgb(17, 20, 32)
@@ -114,9 +119,23 @@ class MainActivity : Activity() {
         selectedSongText = text("No file selected yet", 15f, false, colors.text)
         libraryPanel.addView(selectedSongText, marginParams(match, wrap, top = 10))
         libraryPanel.addView(
-            text("This first playback update supports common video formats such as MP4 when your Android device supports their codecs. KAR/MIDI playback and automatic USB scanning are not available yet.", 13f, false, colors.muted),
+            text("MP4 video playback is available. MIDI/KAR files can be played through the bundled SoundFont; lyrics display and automatic USB scanning are still under development.", 13f, false, colors.muted),
             marginParams(match, wrap, top = 10)
         )
+        libraryPanel.addView(button("Choose MIDI / KAR file", colors.accent, colors.background) {
+            chooseMidi()
+        }, marginParams(match, wrap, top = 12))
+        libraryPanel.addView(button("Play / Resume MIDI", Color.rgb(93, 87, 210), Color.WHITE) {
+            playMidi()
+        }, marginParams(match, wrap, top = 8))
+        libraryPanel.addView(button("Pause MIDI", Color.rgb(60, 72, 101), colors.text) {
+            midiPlayer?.pause()
+            statusText.text = "MIDI paused"
+        }, marginParams(match, wrap, top = 8))
+        libraryPanel.addView(button("Stop MIDI", Color.rgb(60, 72, 101), colors.text) {
+            midiPlayer?.stop()
+            statusText.text = "MIDI stopped"
+        }, marginParams(match, wrap, top = 8))
         content.addView(libraryPanel, marginParams(match, wrap, bottom = 16))
 
         val queuePanel = panel()
@@ -163,11 +182,72 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun chooseMidi() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/midi", "audio/x-midi", "application/x-midi", "application/octet-stream"))
+        }
+        try {
+            startActivityForResult(intent, REQUEST_PICK_MIDI)
+        } catch (_: Exception) {
+            message("The file picker could not be opened on this device.")
+        }
+    }
+
+    private fun playMidi() {
+        val uri = midiUri
+        if (uri == null) {
+            message("Choose a MIDI (.mid) or karaoke (.kar) file first.")
+            return
+        }
+        try {
+            midiPlayer?.close()
+            val soundFont = copySoundFont()
+            val midiFile = File(filesDir, "selected-song.mid")
+            contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Could not read the selected MIDI file." }
+                midiFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            val player = MidiFilePlayer(soundFont, midiFile.absolutePath)
+            midiPlayer = player
+            statusText.text = "Playing MIDI"
+            player.play {
+                runOnUiThread {
+                    statusText.text = "Finished MIDI"
+                    try { player.close() } catch (_: Exception) {}
+                    if (midiPlayer === player) midiPlayer = null
+                }
+            }
+        } catch (e: Exception) {
+            statusText.text = "Could not play MIDI"
+            message("Couldn't start MIDI playback. Please try a standard .mid or .kar file. " + (e.message ?: ""))
+        }
+    }
+
+    private fun copySoundFont(): String {
+        val target = File(filesDir, "reyna-se.sf2")
+        if (!target.exists() || target.length() == 0L) {
+            assets.open("reyna-se.sf2").use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        return target.absolutePath
+    }
+
     @Deprecated("Uses the compatible document picker callback for broad Android device support")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_PICK_SONG || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) return
         val uri: Uri = data?.data ?: return
+        if (requestCode == REQUEST_PICK_MIDI) {
+            midiUri = uri
+            selectedMidiName = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Selected MIDI/KAR"
+            selectedSongText.text = selectedMidiName
+            statusText.text = "Ready • " + (selectedMidiName ?: "MIDI")
+            return
+        }
+        if (requestCode != REQUEST_PICK_SONG) return
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
@@ -252,10 +332,18 @@ class MainActivity : Activity() {
             setMargins(0, dp(top), 0, dp(bottom))
         }
 
+    override fun onDestroy() {
+        try { midiPlayer?.stop() } catch (_: Exception) {}
+        try { midiPlayer?.close() } catch (_: Exception) {}
+        midiPlayer = null
+        super.onDestroy()
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
         private const val REQUEST_PICK_SONG = 101
+        private const val REQUEST_PICK_MIDI = 102
         private const val match = ViewGroup.LayoutParams.MATCH_PARENT
         private const val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
     }
