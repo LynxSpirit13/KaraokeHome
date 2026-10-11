@@ -39,7 +39,7 @@ class PlayerActivity : Activity() {
         overlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(16), dp(22), dp(16))
-            setBackgroundColor(0x990A0D16.toInt())
+            setBackgroundColor(Color.TRANSPARENT)
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
