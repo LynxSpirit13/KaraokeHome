@@ -27,6 +27,11 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Copy SoundFont into Android assets
+        run: |
+          mkdir -p app/src/main/assets
+          cp "reyna se.sf2" app/src/main/assets/reyna-se.sf2
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
