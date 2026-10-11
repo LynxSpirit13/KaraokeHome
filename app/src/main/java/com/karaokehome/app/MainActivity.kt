@@ -91,6 +91,22 @@ class MainActivity : Activity() {
             },
             marginParams(match, wrap, top = 8)
         )
+
+        playerPanel.addView(
+            button("Open full-screen TV player", Color.rgb(93, 87, 210), Color.WHITE) {
+                val uri = selectedUri
+                if (uri == null) {
+                    message("Choose an MP4 video first.")
+                } else {
+                    startActivity(Intent(this, PlayerActivity::class.java).apply {
+                        putExtra(PlayerActivity.EXTRA_URI, uri.toString())
+                        putExtra(PlayerActivity.EXTRA_TITLE, selectedSong ?: "Karaoke video")
+                        putStringArrayListExtra(PlayerActivity.EXTRA_QUEUE, ArrayList(queue))
+                    })
+                }
+            },
+            marginParams(match, wrap, top = 8)
+        )
         content.addView(playerPanel, marginParams(match, wrap, bottom = 16))
 
         val libraryPanel = panel()
