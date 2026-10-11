@@ -50,6 +50,7 @@ class PlayerActivity : Activity() {
             textSize = 18f
             setTextColor(Color.WHITE)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.BLACK)
         }
         top.addView(titleText, LinearLayout.LayoutParams(0, -2, 1f))
         val close = TextView(this).apply {
@@ -57,6 +58,7 @@ class PlayerActivity : Activity() {
             textSize = 16f
             setTextColor(Color.WHITE)
             setPadding(dp(14), dp(10), dp(8), dp(10))
+            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.BLACK)
             setOnClickListener { finish() }
         }
         top.addView(close)
@@ -65,6 +67,7 @@ class PlayerActivity : Activity() {
         countText = TextView(this).apply {
             textSize = 16f
             setTextColor(0xFF75E0C0.toInt())
+            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.BLACK)
             setPadding(0, dp(10), 0, 0)
         }
         overlay.addView(countText)
