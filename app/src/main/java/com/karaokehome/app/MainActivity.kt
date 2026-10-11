@@ -11,15 +11,19 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.MediaController
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.VideoView
 
 class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var selectedSongText: TextView
     private lateinit var queueText: TextView
+    private lateinit var videoView: VideoView
     private val queue = mutableListOf<String>()
     private var selectedSong: String? = null
+    private var selectedUri: Uri? = null
 
     private val colors = object {
         val background = Color.rgb(17, 20, 32)
@@ -37,7 +41,7 @@ class MainActivity : Activity() {
     private fun buildScreen() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
             setBackgroundColor(colors.background)
         }
 
@@ -47,54 +51,70 @@ class MainActivity : Activity() {
         }
         scroll.addView(content)
 
-        val brand = text("KaraokeHome", 30f, true, colors.text).apply {
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        content.addView(brand, marginParams(match, wrap, bottom = 4))
-
+        content.addView(
+            text("KaraokeHome", 30f, true, colors.text),
+            marginParams(match, wrap, bottom = 4)
+        )
         content.addView(
             text("Your living-room karaoke system", 16f, false, colors.muted),
-            marginParams(match, wrap, bottom = 22)
+            marginParams(match, wrap, bottom = 18)
         )
 
         val playerPanel = panel()
         playerPanel.addView(text("NOW PLAYING", 12f, true, colors.accent))
+        videoView = VideoView(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
         playerPanel.addView(
-            text("Choose a karaoke video to get started", 20f, true, colors.text),
-            marginParams(match, wrap, top = 10, bottom = 8)
+            videoView,
+            LinearLayout.LayoutParams(match, dp(220)).apply {
+                topMargin = dp(10)
+                bottomMargin = dp(12)
+            }
         )
-        statusText = text("Ready • No song selected", 14f, false, colors.muted)
+        playerPanel.addView(
+            text("Choose an MP4 karaoke video. Playback starts here.", 15f, false, colors.muted),
+            marginParams(match, wrap, bottom = 10)
+        )
+        statusText = text("Ready • No video playing", 14f, false, colors.muted)
         playerPanel.addView(statusText)
         playerPanel.addView(
-            button("Choose a song", colors.accent, colors.background) {
+            button("Choose MP4 video", colors.accent, colors.background) {
                 chooseSong()
             },
-            marginParams(match, wrap, top = 16)
+            marginParams(match, wrap, top = 14)
+        )
+        playerPanel.addView(
+            button("Stop playback", Color.rgb(60, 72, 101), colors.text) {
+                videoView.stopPlayback()
+                statusText.text = "Playback stopped"
+            },
+            marginParams(match, wrap, top = 8)
         )
         content.addView(playerPanel, marginParams(match, wrap, bottom = 16))
 
         val libraryPanel = panel()
-        libraryPanel.addView(text("SONG LIBRARY", 12f, true, colors.accent))
+        libraryPanel.addView(text("SELECTED FILE", 12f, true, colors.accent))
+        selectedSongText = text("No file selected yet", 15f, false, colors.text)
+        libraryPanel.addView(selectedSongText, marginParams(match, wrap, top = 10))
         libraryPanel.addView(
-            text("Select an MP4, audio, MIDI, or KAR file from your device. Full playback and automatic USB scanning are planned next.", 15f, false, colors.muted),
-            marginParams(match, wrap, top = 10, bottom = 12)
+            text("This first playback update supports common video formats such as MP4 when your Android device supports their codecs. KAR/MIDI playback and automatic USB scanning are not available yet.", 13f, false, colors.muted),
+            marginParams(match, wrap, top = 10)
         )
-        selectedSongText = text("No file selected yet", 14f, false, colors.text)
-        libraryPanel.addView(selectedSongText)
         content.addView(libraryPanel, marginParams(match, wrap, bottom = 16))
 
         val queuePanel = panel()
         queuePanel.addView(text("SINGING QUEUE", 12f, true, colors.accent))
         queueText = text("No songs in the queue yet", 15f, false, colors.muted)
         queuePanel.addView(queueText, marginParams(match, wrap, top = 10, bottom = 12))
-        queuePanel.addView(button("Add selected song to queue", Color.rgb(60, 72, 101), colors.text) {
+        queuePanel.addView(button("Add selected file to queue", Color.rgb(60, 72, 101), colors.text) {
             val song = selectedSong
             if (song == null) {
-                message("Choose a song first.")
+                message("Choose a file first.")
             } else {
                 queue.add(song)
                 updateQueue()
-                message("Added to the queue.")
+                message("Added to the queue. Queue playback is not automatic yet.")
             }
         })
         queuePanel.addView(button("Clear queue", Color.rgb(60, 72, 101), colors.text) {
@@ -106,7 +126,7 @@ class MainActivity : Activity() {
         val remotePanel = panel()
         remotePanel.addView(text("PHONE REMOTE", 12f, true, colors.accent))
         remotePanel.addView(
-            text("TV pairing by QR code and local Wi-Fi remote control are planned features. This prototype currently works as a standalone screen.", 15f, false, colors.muted),
+            text("TV pairing, QR code, shared song library and local Wi-Fi remote control are still under development.", 14f, false, colors.muted),
             marginParams(match, wrap, top = 10)
         )
         content.addView(remotePanel)
@@ -118,17 +138,9 @@ class MainActivity : Activity() {
     private fun chooseSong() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                "video/mp4",
-                "audio/*",
-                "application/octet-stream",
-                "application/x-kar",
-                "audio/midi"
-            ))
+            type = "video/*"
         }
         try {
-            @Suppress("DEPRECATION")
             startActivityForResult(intent, REQUEST_PICK_SONG)
         } catch (_: Exception) {
             message("The file picker could not be opened on this device.")
@@ -138,21 +150,44 @@ class MainActivity : Activity() {
     @Deprecated("Uses the compatible document picker callback for broad Android device support")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_PICK_SONG && resultCode == RESULT_OK) {
-            val uri: Uri = data?.data ?: return
-            try {
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: SecurityException) {
-                // Some document providers do not offer persistable permissions.
+        if (requestCode != REQUEST_PICK_SONG || resultCode != RESULT_OK) return
+        val uri: Uri = data?.data ?: return
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Some document providers do not offer persistable permissions.
+        }
+        selectedUri = uri
+        selectedSong = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: "Selected video"
+        selectedSongText.text = selectedSong
+        playSelectedVideo(uri)
+    }
+
+    private fun playSelectedVideo(uri: Uri) {
+        statusText.text = "Loading video…"
+        try {
+            videoView.stopPlayback()
+            videoView.setVideoURI(uri)
+            val controller = MediaController(this)
+            controller.setAnchorView(videoView)
+            videoView.setMediaController(controller)
+            videoView.setOnPreparedListener { mediaPlayer ->
+                mediaPlayer.isLooping = false
+                videoView.start()
+                statusText.text = "Playing • ${selectedSong ?: "Video"}"
             }
-            val name = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-                ?: "Selected media file"
-            selectedSong = name
-            selectedSongText.text = name
-            statusText.text = "File selected • Playback is not implemented yet"
+            videoView.setOnCompletionListener {
+                statusText.text = "Finished • ${selectedSong ?: "Video"}"
+            }
+            videoView.setOnErrorListener { _, what, extra ->
+                statusText.text = "Could not play this video"
+                message("Android couldn't play this file (error $what/$extra). Try a standard MP4 using H.264 video and AAC audio.")
+                true
+            }
+        } catch (_: Exception) {
+            statusText.text = "Could not open this video"
+            message("Couldn't open that file. Please try another MP4 video.")
         }
     }
 
@@ -196,14 +231,10 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun marginParams(
-        width: Int,
-        height: Int,
-        top: Int = 0,
-        bottom: Int = 0
-    ) = LinearLayout.LayoutParams(width, height).apply {
-        setMargins(0, dp(top), 0, dp(bottom))
-    }
+    private fun marginParams(width: Int, height: Int, top: Int = 0, bottom: Int = 0) =
+        LinearLayout.LayoutParams(width, height).apply {
+            setMargins(0, dp(top), 0, dp(bottom))
+        }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
