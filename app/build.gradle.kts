@@ -30,3 +30,7 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    implementation("dev.kotlinds:fluidsynth-kmp:1.1.0")
+}
