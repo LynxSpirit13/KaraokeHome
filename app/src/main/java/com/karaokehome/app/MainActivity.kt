@@ -331,33 +331,76 @@ class MainActivity : Activity() {
 
     private fun playVideo(song: Song) {
         stopMidi()
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK); setPadding(dp(8), dp(8), dp(8), dp(8)) }
-        root.addView(label("NOW PLAYING  •  ${song.number}", 11f, true, bright), lp(-1, -2, 0, 5))
-        root.addView(label(song.title, 18f, true, white), lp(-1, -2, 0, 8))
-        video = VideoView(this).apply { setBackgroundColor(Color.BLACK) }
-        root.addView(video, LinearLayout.LayoutParams(-1, 0, 1f))
+        try {
+            if (videoInitialized()) {
+                try { video.stopPlayback() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        root.addView(label("KTV MODE  •  TRACK ${song.number}", 12f, true, bright), lp(-1, -2, 0, 4))
+        root.addView(label(song.title, 18f, true, white), lp(-1, -2, 0, 6))
+        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        video = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
+        stage.addView(video, FrameLayout.LayoutParams(-1, -1))
+        val lyricOverlay = TextView(this).apply {
+            text = "KARAOKE MODE\\n\\nIf lyrics are available, place a matching .lrc or .txt file beside this video."
+            textSize = 19f
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setTextColor(Color.WHITE)
+            setShadowLayer(5f, 2f, 2f, Color.BLACK)
+            setBackgroundColor(Color.argb(100, 0, 0, 0))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, dp(90), Gravity.BOTTOM))
+        root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
         val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(actionButton("⏮ LIBRARY", panel) { showLibrary() }, weight())
-        controls.addView(actionButton("Ⅱ PAUSE", panel) { if (::video.isInitialized && video.isPlaying) video.pause() }, weight())
-        controls.addView(actionButton("▶ RESUME", red) { if (::video.isInitialized) video.start() }, weight())
-        controls.addView(actionButton("■ STOP", panel) { stopPlayback(); showLibrary() }, weight())
-        root.addView(controls, lp(-1, 46, 8))
-        root.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
+        controls.addView(actionButton("LIBRARY", panel) { safeStopVideo(); showLibrary() }, weight())
+        controls.addView(actionButton("PAUSE", panel) { try { if (video.isPlaying) video.pause() } catch (_: Exception) {} }, weight())
+        controls.addView(actionButton("PLAY", red) { try { video.start() } catch (_: Exception) { message("Video could not start. Try selecting the file again.") } }, weight())
+        controls.addView(actionButton("STOP", panel) { safeStopVideo(); showLibrary() }, weight())
+        root.addView(controls, lp(-1, 46, 6))
+        root.addView(actionButton("RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
             if (queue.none { it.uri == song.uri }) queue.add(song)
-            updateHeader(); Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
-        }, lp(-1, 44, 8))
+            updateHeader()
+            Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+        }, lp(-1, 42, 6))
         content.removeAllViews()
         content.addView(root, LinearLayout.LayoutParams(-1, -1))
+        headerStatus.text = "PREPARING VIDEO"
+        video.setOnPreparedListener { mp ->
+            try {
+                mp.isLooping = false
+                video.start()
+                headerStatus.text = "KTV PLAYING"
+            } catch (e: Exception) {
+                headerStatus.text = "VIDEO ERROR"
+                message("Video could not start: ${e.message ?: "unsupported media"}")
+            }
+        }
+        video.setOnCompletionListener { headerStatus.text = "FINISHED" }
+        video.setOnErrorListener { _, what, extra ->
+            headerStatus.text = "VIDEO ERROR"
+            message("Android could not decode this MP4 (error $what/$extra). Try an H.264 video with AAC audio. If the app closes entirely, send me the phone model and Android version.")
+            true
+        }
         try {
             video.setVideoURI(song.uri)
-            video.setOnPreparedListener { mp -> mp.isLooping = false; video.start(); headerStatus.text = "PLAYING" }
-            video.setOnCompletionListener { headerStatus.text = "FINISHED" }
-            video.setOnErrorListener { _, what, extra ->
-                headerStatus.text = "VIDEO ERROR"
-                message("Unable to play this video ($what/$extra). Try an MP4 encoded with H.264 video and AAC audio.")
-                true
-            }
-        } catch (e: Exception) { message("Could not open video: ${e.message ?: "unknown error"}") }
+        } catch (e: Exception) {
+            headerStatus.text = "VIDEO ERROR"
+            message("Could not open video: ${e.message ?: "unknown error"}")
+        }
+    }
+
+    private fun videoInitialized(): Boolean = ::video.isInitialized
+
+    private fun safeStopVideo() {
+        try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
+        headerStatus.text = "READY"
     }
 
     private fun playMidiSong(song: Song) {
