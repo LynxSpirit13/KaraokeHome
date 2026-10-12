@@ -3,6 +3,7 @@
     <application
         android:allowBackup="true"
         android:label="KaraokeHome"
+        android:icon="@drawable/karaoke_home_logo"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:supportsRtl="true">
         <activity
