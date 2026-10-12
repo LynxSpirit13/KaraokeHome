@@ -144,11 +144,25 @@ class MainActivity : Activity() {
     }
 
     private fun createDirectory(parent: Uri, name: String): Uri {
-        val parentId = try { DocumentsContract.getDocumentId(parent) } catch (_: Exception) { DocumentsContract.getTreeDocumentId(parent) }
+        // ACTION_OPEN_DOCUMENT_TREE returns a tree URI, not a document URI.
+        // Resolve its root ID with getTreeDocumentId before querying or creating children.
+        val parentId = if (DocumentsContract.isTreeUri(parent)) {
+            DocumentsContract.getTreeDocumentId(parent)
+        } else {
+            DocumentsContract.getDocumentId(parent)
+        }
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(parent, parentId)
         var cursor: Cursor? = null
         try {
-            cursor = contentResolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)
+            cursor = contentResolver.query(
+                children,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                ),
+                null, null, null
+            )
             while (cursor?.moveToNext() == true) {
                 val id = cursor.getString(0) ?: continue
                 val display = cursor.getString(1) ?: continue
@@ -157,9 +171,16 @@ class MainActivity : Activity() {
                     return DocumentsContract.buildDocumentUriUsingTree(parent, id)
                 }
             }
-        } finally { cursor?.close() }
-        return DocumentsContract.createDocument(contentResolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
-            ?: throw IllegalStateException("Android could not create $name")
+        } finally {
+            cursor?.close()
+        }
+        val parentDocument = DocumentsContract.buildDocumentUriUsingTree(parent, parentId)
+        return DocumentsContract.createDocument(
+            contentResolver,
+            parentDocument,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            name
+        ) ?: throw IllegalStateException("Android could not create $name")
     }
 
     private fun chooseFolder() {
