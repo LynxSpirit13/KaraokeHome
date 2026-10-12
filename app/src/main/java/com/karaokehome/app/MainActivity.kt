@@ -144,8 +144,8 @@ class MainActivity : Activity() {
     }
 
     private fun createDirectory(parent: Uri, name: String): Uri {
-        val treeId = DocumentsContract.getTreeDocumentId(parent)
-        val children = DocumentsContract.buildChildDocumentsUriUsingTree(parent, treeId)
+        val parentId = try { DocumentsContract.getDocumentId(parent) } catch (_: Exception) { DocumentsContract.getTreeDocumentId(parent) }
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(parent, parentId)
         var cursor: Cursor? = null
         try {
             cursor = contentResolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)
