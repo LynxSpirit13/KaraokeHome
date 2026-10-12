@@ -3,371 +3,381 @@ package com.karaokehome.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.database.Cursor
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.MediaController
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.VideoView
-import java.io.File
+import android.view.WindowManager
+import android.widget.*
 import dev.kotlinds.fluidsynthkmp.MidiFilePlayer
+import java.io.File
 
 class MainActivity : Activity() {
-    private lateinit var statusText: TextView
-    private lateinit var selectedSongText: TextView
-    private lateinit var queueText: TextView
-    private lateinit var videoView: VideoView
-    private val queue = mutableListOf<String>()
-    private var selectedSong: String? = null
-    private var selectedUri: Uri? = null
+    private data class Song(val number: String, val title: String, val uri: Uri, val type: String)
+    private val songs = mutableListOf<Song>()
+    private val queue = mutableListOf<Song>()
+    private var activeSong: Song? = null
     private var midiPlayer: MidiFilePlayer? = null
-    private var selectedMidiName: String? = null
     private var midiUri: Uri? = null
-
-    private val colors = object {
-        val background = Color.rgb(17, 20, 32)
-        val panel = Color.rgb(29, 35, 53)
-        val accent = Color.rgb(83, 190, 164)
-        val text = Color.rgb(246, 248, 252)
-        val muted = Color.rgb(177, 187, 205)
-    }
+    private var videoUri: Uri? = null
+    private var filter = "ALL"
+    private var query = ""
+    private var numberEntry = ""
+    private lateinit var content: LinearLayout
+    private lateinit var headerStatus: TextView
+    private lateinit var video: VideoView
+    private val bg = Color.rgb(8, 8, 12)
+    private val panel = Color.rgb(19, 19, 25)
+    private val red = Color.rgb(224, 18, 39)
+    private val bright = Color.rgb(255, 45, 60)
+    private val white = Color.rgb(246, 246, 250)
+    private val muted = Color.rgb(164, 165, 177)
+    private val divider = Color.rgb(55, 35, 42)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        buildScreen()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        buildShell()
+        showLibrary()
     }
 
-    private fun buildScreen() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            setBackgroundColor(colors.background)
+    private fun buildShell() {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12)); setBackgroundColor(Color.rgb(17, 5, 8))
         }
-
+        header.addView(TextView(this).apply {
+            text = "♫"; textSize = 27f; gravity = Gravity.CENTER; setTextColor(white)
+            setBackgroundColor(red); setPadding(dp(8), 0, dp(8), 0)
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val branding = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
+        branding.addView(label("KaraokeHome", 22f, true, white))
+        branding.addView(label("YOUR HOME KARAOKE SYSTEM  •  MP4 / MIDI / KAR", 9f, true, bright))
+        header.addView(branding, LinearLayout.LayoutParams(0, -2, 1f))
+        headerStatus = label("READY", 10f, true, bright)
+        header.addView(headerStatus)
+        root.addView(header)
+        root.addView(View(this).apply { setBackgroundColor(red) }, LinearLayout.LayoutParams(-1, dp(2)))
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        nav.addView(navButton("SONGS") { showLibrary() }, weight())
+        nav.addView(navButton("TRACK #") { showNumberPad() }, weight())
+        nav.addView(navButton("QUEUE ${queue.size}") { showQueue() }, weight())
+        nav.addView(navButton("SETTINGS") { showSettings() }, weight())
+        root.addView(nav)
         val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
+        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(4), dp(12), dp(16)) }
         scroll.addView(content)
-
-        content.addView(
-            text("KaraokeHome", 30f, true, colors.text),
-            marginParams(match, wrap, bottom = 4)
-        )
-        content.addView(
-            text("Your living-room karaoke system", 16f, false, colors.muted),
-            marginParams(match, wrap, bottom = 18)
-        )
-
-        val playerPanel = panel()
-        playerPanel.addView(text("NOW PLAYING", 12f, true, colors.accent))
-        videoView = VideoView(this).apply {
-            setBackgroundColor(Color.BLACK)
-        }
-        playerPanel.addView(
-            videoView,
-            LinearLayout.LayoutParams(match, dp(220)).apply {
-                topMargin = dp(10)
-                bottomMargin = dp(12)
-            }
-        )
-        playerPanel.addView(
-            text("Choose an MP4 karaoke video. Playback starts here.", 15f, false, colors.muted),
-            marginParams(match, wrap, bottom = 10)
-        )
-        statusText = text("Ready • No video playing", 14f, false, colors.muted)
-        playerPanel.addView(statusText)
-        playerPanel.addView(
-            button("Choose MP4 video", colors.accent, colors.background) {
-                chooseSong()
-            },
-            marginParams(match, wrap, top = 14)
-        )
-        playerPanel.addView(
-            button("Stop playback", Color.rgb(60, 72, 101), colors.text) {
-                videoView.stopPlayback()
-                statusText.text = "Playback stopped"
-            },
-            marginParams(match, wrap, top = 8)
-        )
-
-        playerPanel.addView(
-            button("Open full-screen TV player", Color.rgb(93, 87, 210), Color.WHITE) {
-                val uri = selectedUri
-                if (uri == null) {
-                    message("Choose an MP4 video first.")
-                } else {
-                    startActivity(Intent(this, PlayerActivity::class.java).apply {
-                        putExtra(PlayerActivity.EXTRA_URI, uri.toString())
-                        putExtra(PlayerActivity.EXTRA_TITLE, selectedSong ?: "Karaoke video")
-                        putStringArrayListExtra(PlayerActivity.EXTRA_QUEUE, ArrayList(queue))
-                    })
-                }
-            },
-            marginParams(match, wrap, top = 8)
-        )
-        content.addView(playerPanel, marginParams(match, wrap, bottom = 16))
-
-        val libraryPanel = panel()
-        libraryPanel.addView(text("SELECTED FILE", 12f, true, colors.accent))
-        selectedSongText = text("No file selected yet", 15f, false, colors.text)
-        libraryPanel.addView(selectedSongText, marginParams(match, wrap, top = 10))
-        libraryPanel.addView(
-            text("MP4 video playback is available. MIDI/KAR files can be played through the bundled SoundFont; lyrics display and automatic USB scanning are still under development.", 13f, false, colors.muted),
-            marginParams(match, wrap, top = 10)
-        )
-        libraryPanel.addView(button("Choose MIDI / KAR file", colors.accent, colors.background) {
-            chooseMidi()
-        }, marginParams(match, wrap, top = 12))
-        libraryPanel.addView(button("Play / Resume MIDI", Color.rgb(93, 87, 210), Color.WHITE) {
-            playMidi()
-        }, marginParams(match, wrap, top = 8))
-        libraryPanel.addView(button("Pause MIDI", Color.rgb(60, 72, 101), colors.text) {
-            midiPlayer?.pause()
-            statusText.text = "MIDI paused"
-        }, marginParams(match, wrap, top = 8))
-        libraryPanel.addView(button("Stop MIDI", Color.rgb(60, 72, 101), colors.text) {
-            midiPlayer?.stop()
-            statusText.text = "MIDI stopped"
-        }, marginParams(match, wrap, top = 8))
-        content.addView(libraryPanel, marginParams(match, wrap, bottom = 16))
-
-        val queuePanel = panel()
-        queuePanel.addView(text("SINGING QUEUE", 12f, true, colors.accent))
-        queueText = text("No songs in the queue yet", 15f, false, colors.muted)
-        queuePanel.addView(queueText, marginParams(match, wrap, top = 10, bottom = 12))
-        queuePanel.addView(button("Add selected file to queue", Color.rgb(60, 72, 101), colors.text) {
-            val song = selectedSong
-            if (song == null) {
-                message("Choose a file first.")
-            } else {
-                queue.add(song)
-                updateQueue()
-                message("Added to the queue. Queue playback is not automatic yet.")
-            }
-        })
-        queuePanel.addView(button("Clear queue", Color.rgb(60, 72, 101), colors.text) {
-            queue.clear()
-            updateQueue()
-        }, marginParams(match, wrap, top = 8))
-        content.addView(queuePanel, marginParams(match, wrap, bottom = 16))
-
-        val remotePanel = panel()
-        remotePanel.addView(text("PHONE REMOTE", 12f, true, colors.accent))
-        remotePanel.addView(
-            text("TV pairing, QR code, shared song library and local Wi-Fi remote control are still under development.", 14f, false, colors.muted),
-            marginParams(match, wrap, top = 10)
-        )
-        content.addView(remotePanel)
-
-        root.addView(scroll, LinearLayout.LayoutParams(match, 0, 1f))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
     }
 
-    private fun chooseSong() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "video/*"
+    private fun showLibrary() {
+        content.removeAllViews()
+        val hero = card()
+        hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
+        hero.addView(label("Pick a song. Grab the mic. Sing together.", 18f, true, white), lp(-1, -2, 8))
+        hero.addView(label("One library for your video and classic karaoke files.", 12f, false, muted), lp(-1, -2, 5))
+        hero.addView(actionButton("＋  SCAN LIBRARY FOLDER", red) { chooseFolder() }, lp(-1, 46, 12))
+        content.addView(hero, lp(-1, -2, 0, 10))
+
+        val search = EditText(this).apply {
+            hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
+            singleLine = true; setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
+            setText(query)
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString() ?: ""; renderSongRows() }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            })
         }
-        try {
-            startActivityForResult(intent, REQUEST_PICK_SONG)
-        } catch (_: Exception) {
-            message("The file picker could not be opened on this device.")
+        content.addView(search, lp(-1, 46, 0, 8))
+        val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("ALL", "MP4", "MIDI", "KAR").forEach { f ->
+            filters.addView(actionButton(f, if (filter == f) red else panel) { filter = f; showLibrary() }, weight().apply { rightMargin = dp(4) })
         }
+        content.addView(filters, lp(-1, 38, 0, 8))
+        val listCard = card()
+        val columns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(Color.rgb(34, 11, 16)) }
+        columns.addView(label("TRACK", 10f, true, muted), LinearLayout.LayoutParams(dp(60), -2))
+        columns.addView(label("SONG TITLE", 10f, true, muted), LinearLayout.LayoutParams(0, -2, 1f))
+        columns.addView(label("TYPE", 10f, true, muted), LinearLayout.LayoutParams(dp(42), -2))
+        listCard.addView(columns)
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        rows.tag = "songRows"
+        listCard.addView(rows)
+        content.addView(listCard)
+        content.addView(label("Tap a song to play • Long-press to reserve", 11f, false, muted), lp(-1, -2, 8))
+        renderSongRows()
     }
 
-    private fun chooseMidi() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/midi", "audio/x-midi", "application/x-midi", "application/octet-stream"))
+    private fun renderSongRows() {
+        val rows = content.findViewWithTag<LinearLayout>("songRows") ?: return
+        rows.removeAllViews()
+        val filtered = songs.filter { (filter == "ALL" || it.type == filter) && (query.isBlank() || it.title.contains(query, true) || it.number.contains(query)) }
+        filtered.forEachIndexed { i, song ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(11), dp(8), dp(11)); setBackgroundColor(if (i % 2 == 0) panel else Color.rgb(14, 14, 19))
+                isFocusable = true; isClickable = true
+                setOnClickListener { activeSong = song; playSong(song) }
+                setOnLongClickListener { if (queue.none { it.uri == song.uri }) queue.add(song); updateHeader(); Toast.makeText(this@MainActivity, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show(); true }
+            }
+            row.addView(label(song.number, 11f, true, bright), LinearLayout.LayoutParams(dp(60), -2))
+            row.addView(label(song.title, 13f, false, white), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label(song.type, 10f, true, if (song.type == "MP4") Color.rgb(80, 190, 255) else Color.rgb(80, 220, 165)), LinearLayout.LayoutParams(dp(42), -2))
+            rows.addView(row)
+            rows.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)))
         }
-        try {
-            startActivityForResult(intent, REQUEST_PICK_MIDI)
-        } catch (_: Exception) {
-            message("The file picker could not be opened on this device.")
-        }
+        if (filtered.isEmpty()) rows.addView(label(if (songs.isEmpty()) "No songs yet. Scan the folder containing your MP4, MIDI, and KAR files." else "No matching songs.", 14f, false, muted).apply {
+            gravity = Gravity.CENTER; setPadding(dp(18), dp(28), dp(18), dp(28))
+        })
     }
 
-    private fun playMidi() {
-        val existingPlayer = midiPlayer
-        if (existingPlayer != null) {
-            try {
-                if (existingPlayer.isPlaying) {
-                    statusText.text = "MIDI is already playing"
-                    return
-                }
-                statusText.text = "Resuming MIDI"
-                existingPlayer.play {
-                    runOnUiThread {
-                        statusText.text = "Finished MIDI"
-                        try { existingPlayer.close() } catch (_: Exception) {}
-                        if (midiPlayer === existingPlayer) midiPlayer = null
-                    }
-                }
-                return
-            } catch (e: Exception) {
-                try { existingPlayer.close() } catch (_: Exception) {}
-                if (midiPlayer === existingPlayer) midiPlayer = null
-                message("Couldn't resume MIDI, so the player was reset. Tap Play / Resume again. " + (e.message ?: ""))
-                return
-            }
-        }
-
-        val uri = midiUri
-        if (uri == null) {
-            message("Choose a MIDI (.mid) or karaoke (.kar) file first.")
-            return
-        }
-        try {
-            val soundFont = copySoundFont()
-            val midiFile = File(filesDir, "selected-song.mid")
-            contentResolver.openInputStream(uri).use { input ->
-                requireNotNull(input) { "Could not read the selected MIDI file." }
-                midiFile.outputStream().use { output -> input.copyTo(output) }
-            }
-            val player = MidiFilePlayer(soundFont, midiFile.absolutePath)
-            midiPlayer = player
-            statusText.text = "Playing MIDI"
-            player.play {
-                runOnUiThread {
-                    statusText.text = "Finished MIDI"
-                    try { player.close() } catch (_: Exception) {}
-                    if (midiPlayer === player) midiPlayer = null
-                }
-            }
-        } catch (e: Exception) {
-            statusText.text = "Could not play MIDI"
-            message("Couldn't start MIDI playback. Please try a standard .mid or .kar file. " + (e.message ?: ""))
-        }
+    private fun chooseFolder() {
+        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_FOLDER) }
+        catch (_: Exception) { message("Folder picker is unavailable on this device.") }
     }
 
-    private fun copySoundFont(): String {
-        val target = File(filesDir, "reyna-se.sf2")
-        if (!target.exists() || target.length() == 0L) {
-            assets.open("reyna-se.sf2").use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            }
-        }
-        return target.absolutePath
-    }
-
-    @Deprecated("Uses the compatible document picker callback for broad Android device support")
+    @Deprecated("Document tree callback")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri: Uri = data?.data ?: return
-        if (requestCode == REQUEST_PICK_MIDI) {
+        if (resultCode != RESULT_OK || data?.data == null) return
+        val uri = data.data!!
+        if (requestCode == REQUEST_FOLDER) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+            songs.clear()
+            scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
+            songs.sortBy { it.title.lowercase() }
+            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+            query = ""
+            showLibrary()
+            Toast.makeText(this, "Indexed ${songs.size} karaoke files", Toast.LENGTH_LONG).show()
+        } else if (requestCode == REQUEST_PICK_VIDEO) {
+            videoUri = uri
+            activeSong = Song("000000", uri.lastPathSegment?.substringAfterLast('/') ?: "Video", uri, "MP4")
+            playSong(activeSong!!)
+        } else if (requestCode == REQUEST_PICK_MIDI) {
             midiUri = uri
-            selectedMidiName = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Selected MIDI/KAR"
-            selectedSongText.text = selectedMidiName
-            statusText.text = "Ready • " + (selectedMidiName ?: "MIDI")
-            return
+            activeSong = Song("000000", uri.lastPathSegment?.substringAfterLast('/') ?: "MIDI", uri, "MIDI")
+            playSong(activeSong!!)
         }
-        if (requestCode != REQUEST_PICK_SONG) return
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: SecurityException) {
-            // Some document providers do not offer persistable permissions.
-        }
-        selectedUri = uri
-        selectedSong = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-            ?: "Selected video"
-        selectedSongText.text = selectedSong
-        playSelectedVideo(uri)
     }
 
-    private fun playSelectedVideo(uri: Uri) {
-        statusText.text = "Loading video…"
+    private fun scanTree(tree: Uri, parentId: String, depth: Int) {
+        if (depth > 9 || songs.size >= 15000) return
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        var cursor: Cursor? = null
         try {
-            videoView.stopPlayback()
-            videoView.setVideoURI(uri)
-            val controller = MediaController(this)
-            controller.setAnchorView(videoView)
-            videoView.setMediaController(controller)
-            videoView.setOnPreparedListener { mediaPlayer ->
-                mediaPlayer.isLooping = false
-                videoView.start()
-                statusText.text = "Playing • ${selectedSong ?: "Video"}"
-            }
-            videoView.setOnCompletionListener {
-                statusText.text = "Finished • ${selectedSong ?: "Video"}"
-            }
-            videoView.setOnErrorListener { _, what, extra ->
-                statusText.text = "Could not play this video"
-                message("Android couldn't play this file (error $what/$extra). Try a standard MP4 using H.264 video and AAC audio.")
-                true
+            cursor = contentResolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)
+            while (cursor?.moveToNext() == true) {
+                val id = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: continue
+                val mime = cursor.getString(2) ?: ""
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) scanTree(tree, id, depth + 1)
+                else {
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    val type = when (ext) { "mp4", "m4v" -> "MP4"; "mid", "midi" -> "MIDI"; "kar" -> "KAR"; else -> null }
+                    if (type != null) songs.add(Song("", name.substringBeforeLast('.', name), DocumentsContract.buildDocumentUriUsingTree(tree, id), type))
+                }
             }
         } catch (_: Exception) {
-            statusText.text = "Could not open this video"
-            message("Couldn't open that file. Please try another MP4 video.")
-        }
+        } finally { cursor?.close() }
     }
 
-    private fun updateQueue() {
-        queueText.text = if (queue.isEmpty()) {
-            "No songs in the queue yet"
-        } else {
-            queue.mapIndexed { index, song -> "${index + 1}. $song" }.joinToString("\n")
+    private fun showNumberPad() {
+        content.removeAllViews()
+        content.addView(label("KARAOKE MODE", 12f, true, bright), lp(-1, -2, 4, 8))
+        content.addView(label("Enter a six-digit track number", 15f, false, muted), lp(-1, -2, 0, 12))
+        val numberPanel = card()
+        val display = label(numberEntry.ifEmpty { "______" }, 34f, true, white).apply { gravity = Gravity.CENTER; setBackgroundColor(Color.rgb(40, 8, 15)); setPadding(dp(8), dp(16), dp(8), dp(16)) }
+        numberPanel.addView(display, lp(-1, -2))
+        val keys = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
+        val keypad = listOf(listOf("1","2","3"), listOf("4","5","6"), listOf("7","8","9"), listOf("CLR","0","⌫"))
+        keypad.forEach { group ->
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            group.forEach { key -> r.addView(actionButton(key, panel) {
+                numberEntry = when (key) { "CLR" -> ""; "⌫" -> numberEntry.dropLast(1); else -> if (numberEntry.length < 6) numberEntry + key else numberEntry }
+                display.text = numberEntry.ifEmpty { "______" }
+            }, weight().apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }) }
+            keys.addView(r)
         }
+        numberPanel.addView(keys)
+        numberPanel.addView(actionButton("OK  •  PLAY TRACK", red) {
+            val song = songs.firstOrNull { it.number == numberEntry }
+            if (song == null) message("Track number not found. Scan your library or enter a number shown in the song list.")
+            else { activeSong = song; playSong(song) }
+        }, lp(-1, 48, 8))
+        numberPanel.addView(actionButton("RESERVE TRACK", Color.rgb(55, 35, 42)) {
+            val song = songs.firstOrNull { it.number == numberEntry }
+            if (song == null) message("Track number not found.") else {
+                if (queue.none { it.uri == song.uri }) queue.add(song)
+                updateHeader(); message("Added to reservation queue.")
+            }
+        }, lp(-1, 44, 8))
+        content.addView(numberPanel)
     }
 
-    private fun panel(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(16), dp(16), dp(16))
-        setBackgroundColor(colors.panel)
+    private fun showQueue() {
+        content.removeAllViews()
+        content.addView(label("SONG RESERVATION QUEUE", 17f, true, white), lp(-1, -2, 4, 10))
+        content.addView(label("${queue.size} reserved song(s)", 12f, false, muted), lp(-1, -2, 0, 10))
+        queue.toList().forEachIndexed { index, song ->
+            val row = card()
+            row.addView(label("${song.number}  •  ${song.title}", 14f, true, white))
+            row.addView(label(song.type, 11f, true, bright), lp(-1, -2, 5))
+            val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            controls.addView(actionButton("↑", panel) { if (index > 0) { val item = queue.removeAt(index); queue.add(index - 1, item); showQueue() } }, weight())
+            controls.addView(actionButton("↓", panel) { if (index < queue.lastIndex) { val item = queue.removeAt(index); queue.add(index + 1, item); showQueue() } }, weight())
+            controls.addView(actionButton("PLAY", red) { activeSong = song; playSong(song) }, weight())
+            controls.addView(actionButton("REMOVE", panel) { queue.remove(song); showQueue(); updateHeader() }, weight())
+            row.addView(controls, lp(-1, 42, 8))
+            content.addView(row, lp(-1, -2, 0, 8))
+        }
+        if (queue.isEmpty()) content.addView(label("Your reservation queue is empty.", 14f, false, muted), lp(-1, -2, 0, 16))
+        content.addView(actionButton("CLEAR QUEUE", red) { queue.clear(); showQueue(); updateHeader() }, lp(-1, 46, 8))
+        content.addView(actionButton("PLAY NEXT RESERVED SONG", Color.rgb(60, 35, 43)) {
+            if (queue.isEmpty()) message("Queue is empty.") else { val next = queue.removeAt(0); showQueue(); activeSong = next; playSong(next); updateHeader() }
+        }, lp(-1, 46, 8))
     }
 
-    private fun text(value: String, size: Float, bold: Boolean, color: Int) =
-        TextView(this).apply {
-            text = value
-            textSize = size
-            setTextColor(color)
-            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-    private fun button(label: String, background: Int, foreground: Int, action: () -> Unit) =
-        Button(this).apply {
-            text = label
-            setTextColor(foreground)
-            setBackgroundColor(background)
-            isAllCaps = false
-            textSize = 15f
-            setOnClickListener { action() }
-        }
-
-    private fun message(value: String) {
-        AlertDialog.Builder(this)
-            .setMessage(value)
-            .setPositiveButton("OK", null)
-            .show()
+    private fun showSettings() {
+        content.removeAllViews()
+        content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
+        val c = card()
+        c.addView(label("LIBRARY", 11f, true, bright))
+        c.addView(label("Choose a folder containing MP4, MIDI, and KAR files. Subfolders are scanned too.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(actionButton("CHOOSE / RESCAN FOLDER", red) { chooseFolder() }, lp(-1, 46, 10))
+        c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
+        c.addView(label("PLAYBACK", 11f, true, bright))
+        c.addView(label("MP4 video: Android-supported video/audio codecs. MIDI/KAR: bundled SoundFont playback. Lyrics, scoring, microphone mixing, separate BGV overlays, and network phone-to-TV pairing are not implemented yet.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(actionButton("PICK MP4 VIDEO", panel) { chooseVideoFile() }, lp(-1, 44, 10))
+        c.addView(actionButton("PICK MIDI / KAR FILE", panel) { chooseMidiFile() }, lp(-1, 44, 8))
+        c.addView(actionButton("STOP PLAYBACK", panel) { stopPlayback() }, lp(-1, 44, 8))
+        content.addView(c)
     }
 
-    private fun marginParams(width: Int, height: Int, top: Int = 0, bottom: Int = 0) =
-        LinearLayout.LayoutParams(width, height).apply {
-            setMargins(0, dp(top), 0, dp(bottom))
-        }
+    private fun chooseVideoFile() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "video/*" }, REQUEST_PICK_VIDEO)
+    }
 
-    override fun onDestroy() {
-        try { midiPlayer?.stop() } catch (_: Exception) {}
-        try { midiPlayer?.close() } catch (_: Exception) {}
+    private fun chooseMidiFile() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/midi", "audio/x-midi", "application/x-midi", "application/octet-stream"))
+        }, REQUEST_PICK_MIDI)
+    }
+
+    private fun playSong(song: Song) {
+        if (song.type == "MP4") playVideo(song)
+        else playMidiSong(song)
+    }
+
+    private fun playVideo(song: Song) {
+        stopMidi()
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK); setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        root.addView(label("NOW PLAYING  •  ${song.number}", 11f, true, bright), lp(-1, -2, 0, 5))
+        root.addView(label(song.title, 18f, true, white), lp(-1, -2, 0, 8))
+        video = VideoView(this).apply { setBackgroundColor(Color.BLACK) }
+        root.addView(video, LinearLayout.LayoutParams(-1, 0, 1f))
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        controls.addView(actionButton("⏮ LIBRARY", panel) { showLibrary() }, weight())
+        controls.addView(actionButton("Ⅱ PAUSE", panel) { if (::video.isInitialized && video.isPlaying) video.pause() }, weight())
+        controls.addView(actionButton("▶ RESUME", red) { if (::video.isInitialized) video.start() }, weight())
+        controls.addView(actionButton("■ STOP", panel) { stopPlayback(); showLibrary() }, weight())
+        root.addView(controls, lp(-1, 46, 8))
+        root.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
+            if (queue.none { it.uri == song.uri }) queue.add(song)
+            updateHeader(); Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+        }, lp(-1, 44, 8))
+        content.removeAllViews()
+        content.addView(root, LinearLayout.LayoutParams(-1, -1))
+        try {
+            video.setVideoURI(song.uri)
+            video.setOnPreparedListener { mp -> mp.isLooping = false; video.start(); headerStatus.text = "PLAYING" }
+            video.setOnCompletionListener { headerStatus.text = "FINISHED" }
+            video.setOnErrorListener { _, what, extra ->
+                headerStatus.text = "VIDEO ERROR"
+                message("Unable to play this video ($what/$extra). Try an MP4 encoded with H.264 video and AAC audio.")
+                true
+            }
+        } catch (e: Exception) { message("Could not open video: ${e.message ?: "unknown error"}") }
+    }
+
+    private fun playMidiSong(song: Song) {
+        stopMidi()
+        try {
+            val sf = File(filesDir, "reyna-se.sf2")
+            if (!sf.exists() || sf.length() == 0L) assets.open("reyna-se.sf2").use { input -> sf.outputStream().use { output -> input.copyTo(output) } }
+            val midi = File(cacheDir, "song-${song.number}.mid")
+            contentResolver.openInputStream(song.uri).use { input ->
+                requireNotNull(input) { "File could not be read" }
+                midi.outputStream().use { output -> input.copyTo(output) }
+            }
+            val player = MidiFilePlayer(sf.absolutePath, midi.absolutePath)
+            midiPlayer = player
+            content.removeAllViews()
+            val c = card()
+            c.addView(label("NOW PLAYING  •  ${song.type}", 11f, true, bright))
+            c.addView(label(song.title, 20f, true, white), lp(-1, -2, 8))
+            c.addView(label("MIDI instrument playback via bundled SoundFont. Embedded KAR lyrics are not displayed yet.", 13f, false, muted), lp(-1, -2, 8))
+            c.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, lp(-1, 46, 12))
+            c.addView(actionButton("▶ RESTART / PLAY", red) {
+                try { player.stop(); player.close() } catch (_: Exception) {}
+                midiPlayer = null; playMidiSong(song)
+            }, lp(-1, 46, 8))
+            c.addView(actionButton("■ STOP", panel) { stopMidi(); showLibrary() }, lp(-1, 46, 8))
+            c.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
+                if (queue.none { it.uri == song.uri }) queue.add(song)
+                updateHeader(); Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+            }, lp(-1, 46, 8))
+            content.addView(c)
+            player.play { runOnUiThread { headerStatus.text = "FINISHED"; try { player.close() } catch (_: Exception) {}; if (midiPlayer === player) midiPlayer = null } }
+            headerStatus.text = "PLAYING MIDI"
+        } catch (e: Exception) { message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}") }
+    }
+
+    private fun stopPlayback() {
+        try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
+        stopMidi()
+        headerStatus.text = "READY"
+    }
+
+    private fun stopMidi() {
+        val player = midiPlayer
         midiPlayer = null
-        super.onDestroy()
+        try { player?.stop() } catch (_: Exception) {}
+        try { player?.close() } catch (_: Exception) {}
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun updateHeader() { if (::headerStatus.isInitialized) headerStatus.text = "QUEUE ${queue.size}" }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(14)); setBackgroundColor(panel)
+    }
+    private fun label(value: String, size: Float, bold: Boolean, color: Int) = TextView(this).apply {
+        text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+    }
+    private fun actionButton(value: String, color: Int, action: () -> Unit) = Button(this).apply {
+        text = value; textSize = 12f; isAllCaps = false; setTextColor(white); setBackgroundColor(color)
+        isFocusable = true; setOnClickListener { action() }
+    }
+    private fun navButton(value: String, action: () -> Unit) = actionButton(value, Color.rgb(35, 13, 19), action)
+    private fun lp(w: Int, h: Int, top: Int = 0, bottom: Int = 0) = LinearLayout.LayoutParams(w, h).apply { topMargin = dp(top); bottomMargin = dp(bottom) }
+    private fun weight() = LinearLayout.LayoutParams(0, dp(42), 1f)
+    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+    private fun message(value: String) { AlertDialog.Builder(this).setMessage(value).setPositiveButton("OK", null).show() }
+
+    override fun onDestroy() { stopPlayback(); super.onDestroy() }
 
     companion object {
-        private const val REQUEST_PICK_SONG = 101
-        private const val REQUEST_PICK_MIDI = 102
-        private const val match = ViewGroup.LayoutParams.MATCH_PARENT
-        private const val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        private const val REQUEST_FOLDER = 201
+        private const val REQUEST_PICK_VIDEO = 202
+        private const val REQUEST_PICK_MIDI = 203
     }
 }
