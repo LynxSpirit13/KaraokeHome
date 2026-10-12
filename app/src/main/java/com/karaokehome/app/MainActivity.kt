@@ -193,26 +193,20 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data?.data == null) return
         val uri = data.data!!
-        if (requestCode == REQUEST_HOME_FOLDER) {
-            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) {}
-            try {
-                val homeUri = createDirectory(uri, "KaraokeHome")
-                val names = listOf("Songs", "SoundFonts", "BGV", "Lyrics", "Playlists", "Other")
-                names.forEach { createDirectory(homeUri, it) }
-                getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("home_tree_uri", homeUri.toString()).apply()
-                message("KaraokeHome folder created with Songs, SoundFonts, BGV, Lyrics, Playlists, and Other folders. Put your files into the matching folders, then scan the Songs folder.")
-            } catch (e: Exception) {
-                message("Could not create the folder here. Please choose a writable location, such as Documents or internal shared storage. Details: ${e.message ?: "permission denied"}")
-            }
-        } else if (requestCode == REQUEST_FOLDER) {
+        if (requestCode == REQUEST_HOME_FOLDER || requestCode == REQUEST_FOLDER) {
+            // Use the existing SongHub folder directly. No duplicate KaraokeHome folder
+            // or copied media is created, so both apps can share the same song files.
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+            getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("home_tree_uri", uri.toString()).apply()
             songs.clear()
             scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
             songs.sortBy { it.title.lowercase() }
             for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
             query = ""
             showLibrary()
-            Toast.makeText(this, "Indexed ${songs.size} karaoke files", Toast.LENGTH_LONG).show()
+            val count = songs.size
+            Toast.makeText(this, "Indexed $count karaoke files from selected folder", Toast.LENGTH_LONG).show()
+            if (count == 0) message("No MP4, MIDI, or KAR files found. Choose the actual SongHub song folder, not its parent or a folder containing only app data.")
         } else if (requestCode == REQUEST_PICK_VIDEO) {
             videoUri = uri
             activeSong = Song("000000", uri.lastPathSegment?.substringAfterLast('/') ?: "Video", uri, "MP4")
@@ -306,10 +300,10 @@ class MainActivity : Activity() {
         content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
         val c = card()
         c.addView(label("LIBRARY", 11f, true, bright))
-        c.addView(label("Choose a folder containing MP4, MIDI, and KAR files. Subfolders are scanned too.", 13f, false, muted), lp(-1, -2, 6))
-        c.addView(actionButton("CREATE KARAOKEHOME FOLDER", red) { chooseHomeFolderLocation() }, lp(-1, 46, 10))
+        c.addView(label("Select your existing SongHub song folder. KaraokeHome reads the same files without copying them or creating duplicates.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(actionButton("USE EXISTING SONGHUB FOLDER", red) { chooseHomeFolderLocation() }, lp(-1, 46, 10))
         c.addView(actionButton("CHOOSE / RESCAN SONGS FOLDER", panel) { chooseFolder() }, lp(-1, 46, 8))
-        c.addView(label("Folder layout: Songs / SoundFonts / BGV / Lyrics / Playlists / Other", 12f, false, muted), lp(-1, -2, 8))
+        c.addView(label("Shared library: existing SongHub folder • no duplicate media storage", 12f, false, muted), lp(-1, -2, 8))
         c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
         c.addView(label("PLAYBACK", 11f, true, bright))
         c.addView(label("MP4 video: Android-supported video/audio codecs. MIDI/KAR: bundled SoundFont playback. Lyrics, scoring, microphone mixing, separate BGV overlays, and network phone-to-TV pairing are not implemented yet.", 13f, false, muted), lp(-1, -2, 6))
