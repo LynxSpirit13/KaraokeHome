@@ -196,13 +196,36 @@ class MainActivity : Activity() {
     }
 
     private fun playMidi() {
+        val existingPlayer = midiPlayer
+        if (existingPlayer != null) {
+            try {
+                if (existingPlayer.isPlaying) {
+                    statusText.text = "MIDI is already playing"
+                    return
+                }
+                statusText.text = "Resuming MIDI"
+                existingPlayer.play {
+                    runOnUiThread {
+                        statusText.text = "Finished MIDI"
+                        try { existingPlayer.close() } catch (_: Exception) {}
+                        if (midiPlayer === existingPlayer) midiPlayer = null
+                    }
+                }
+                return
+            } catch (e: Exception) {
+                try { existingPlayer.close() } catch (_: Exception) {}
+                if (midiPlayer === existingPlayer) midiPlayer = null
+                message("Couldn't resume MIDI, so the player was reset. Tap Play / Resume again. " + (e.message ?: ""))
+                return
+            }
+        }
+
         val uri = midiUri
         if (uri == null) {
             message("Choose a MIDI (.mid) or karaoke (.kar) file first.")
             return
         }
         try {
-            midiPlayer?.close()
             val soundFont = copySoundFont()
             val midiFile = File(filesDir, "selected-song.mid")
             contentResolver.openInputStream(uri).use { input ->
