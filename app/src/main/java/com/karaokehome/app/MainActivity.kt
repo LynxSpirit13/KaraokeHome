@@ -356,6 +356,8 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.argb(100, 0, 0, 0))
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
+        lyricOverlay.text = loadSiblingLyrics(song)
+            ?: "NO LYRICS FOUND\\nAdd a matching .lrc or .txt file beside this song."
         stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, dp(90), Gravity.BOTTOM))
         root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
         val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -401,6 +403,52 @@ class MainActivity : Activity() {
     private fun safeStopVideo() {
         try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
         headerStatus.text = "READY"
+    }
+
+    private fun loadSiblingLyrics(song: Song): String? {
+        return try {
+            val tree = song.uri
+            val documentId = DocumentsContract.getDocumentId(tree)
+            val parentId = documentId.substringBeforeLast('/', "")
+            if (parentId.isBlank()) return null
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+            var lyricsUri: Uri? = null
+            var cursor: Cursor? = null
+            try {
+                cursor = contentResolver.query(
+                    children,
+                    arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE),
+                    null, null, null
+                )
+                val base = song.title.substringBeforeLast('.', song.title).trim()
+                while (cursor?.moveToNext() == true) {
+                    val id = cursor.getString(0) ?: continue
+                    val name = cursor.getString(1) ?: continue
+                    val mime = cursor.getString(2) ?: ""
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (mime != DocumentsContract.Document.MIME_TYPE_DIR &&
+                        (ext == "lrc" || ext == "txt") &&
+                        name.substringBeforeLast('.', name).equals(base, true)
+                    ) {
+                        lyricsUri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                        break
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+            val found = lyricsUri ?: return null
+            contentResolver.openInputStream(found)?.bufferedReader()?.use { reader ->
+                reader.readText().take(12000).lineSequence()
+                    .filter { it.isNotBlank() }
+                    .map { line -> line.replace(Regex("^\\\\[[0-9:.]+\\\\]"), "").trim() }
+                    .take(8)
+                    .joinToString("\\n")
+                    .takeIf { it.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun playMidiSong(song: Song) {
