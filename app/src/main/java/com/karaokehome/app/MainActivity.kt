@@ -87,7 +87,7 @@ class MainActivity : Activity() {
 
         val search = EditText(this).apply {
             hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
-            singleLine = true; setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
+            setSingleLine(true); setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
             setText(query)
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -138,6 +138,30 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun chooseHomeFolderLocation() {
+        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_HOME_FOLDER) }
+        catch (_: Exception) { message("Folder picker is unavailable on this device.") }
+    }
+
+    private fun createDirectory(parent: Uri, name: String): Uri {
+        val treeId = DocumentsContract.getTreeDocumentId(parent)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(parent, treeId)
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)
+            while (cursor?.moveToNext() == true) {
+                val id = cursor.getString(0) ?: continue
+                val display = cursor.getString(1) ?: continue
+                val mime = cursor.getString(2) ?: ""
+                if (display.equals(name, true) && mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    return DocumentsContract.buildDocumentUriUsingTree(parent, id)
+                }
+            }
+        } finally { cursor?.close() }
+        return DocumentsContract.createDocument(contentResolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
+            ?: throw IllegalStateException("Android could not create $name")
+    }
+
     private fun chooseFolder() {
         try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_FOLDER) }
         catch (_: Exception) { message("Folder picker is unavailable on this device.") }
@@ -148,7 +172,18 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data?.data == null) return
         val uri = data.data!!
-        if (requestCode == REQUEST_FOLDER) {
+        if (requestCode == REQUEST_HOME_FOLDER) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) {}
+            try {
+                val homeUri = createDirectory(uri, "KaraokeHome")
+                val names = listOf("Songs", "SoundFonts", "BGV", "Lyrics", "Playlists", "Other")
+                names.forEach { createDirectory(homeUri, it) }
+                getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("home_tree_uri", homeUri.toString()).apply()
+                message("KaraokeHome folder created with Songs, SoundFonts, BGV, Lyrics, Playlists, and Other folders. Put your files into the matching folders, then scan the Songs folder.")
+            } catch (e: Exception) {
+                message("Could not create the folder here. Please choose a writable location, such as Documents or internal shared storage. Details: ${e.message ?: "permission denied"}")
+            }
+        } else if (requestCode == REQUEST_FOLDER) {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             songs.clear()
             scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
@@ -251,7 +286,9 @@ class MainActivity : Activity() {
         val c = card()
         c.addView(label("LIBRARY", 11f, true, bright))
         c.addView(label("Choose a folder containing MP4, MIDI, and KAR files. Subfolders are scanned too.", 13f, false, muted), lp(-1, -2, 6))
-        c.addView(actionButton("CHOOSE / RESCAN FOLDER", red) { chooseFolder() }, lp(-1, 46, 10))
+        c.addView(actionButton("CREATE KARAOKEHOME FOLDER", red) { chooseHomeFolderLocation() }, lp(-1, 46, 10))
+        c.addView(actionButton("CHOOSE / RESCAN SONGS FOLDER", panel) { chooseFolder() }, lp(-1, 46, 8))
+        c.addView(label("Folder layout: Songs / SoundFonts / BGV / Lyrics / Playlists / Other", 12f, false, muted), lp(-1, -2, 8))
         c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
         c.addView(label("PLAYBACK", 11f, true, bright))
         c.addView(label("MP4 video: Android-supported video/audio codecs. MIDI/KAR: bundled SoundFont playback. Lyrics, scoring, microphone mixing, separate BGV overlays, and network phone-to-TV pairing are not implemented yet.", 13f, false, muted), lp(-1, -2, 6))
@@ -377,6 +414,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQUEST_FOLDER = 201
+        private const val REQUEST_HOME_FOLDER = 204
         private const val REQUEST_PICK_VIDEO = 202
         private const val REQUEST_PICK_MIDI = 203
     }
