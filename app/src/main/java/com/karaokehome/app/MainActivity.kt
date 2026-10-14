@@ -866,7 +866,7 @@ class MainActivity : Activity() {
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     headerStatus.text = "VIDEO ERROR"
-                    message("This video could not be decoded. Try an MP4 encoded as H.264 video with AAC audio. Details: \${error.errorCodeName}")
+                    message("This video could not be decoded. Try an MP4 encoded as H.264 video with AAC audio. Details: ${error.errorCodeName}")
                 }
             })
             player.setMediaItem(MediaItem.fromUri(song.uri))
@@ -876,7 +876,7 @@ class MainActivity : Activity() {
             safeStopVideo()
             showLibrary()
             headerStatus.text = "VIDEO ERROR"
-            message("Could not open video: \${e.message ?: "unsupported media"}")
+            message("Could not open video: ${e.message ?: "unsupported media"}")
         }
     }
 
