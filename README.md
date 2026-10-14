@@ -1,34 +1,32 @@
 # KaraokeHome
 
-A phone-friendly Android karaoke project for Android phones and Android TV.
-
-## Current prototype
-
-- Dark, high-contrast KaraokeHome screen.
-- File picker to select a local media file.
-- Simple in-memory singing queue.
-- Android TV launcher category.
-- GitHub Actions workflow to build a debug APK and save it as a workflow artifact.
-
-## Planned features
-
-- MP4 karaoke video playback as the main full-screen content.
-- KAR/MIDI playback with optional background video.
-- Song library scanning from TV storage and USB drives.
-- Search, queue management, and song reservations.
-- Phone remote with lyrics and playback status.
-- QR-code pairing and local Wi-Fi control without internet.
+KaraokeHome is an early-stage Android karaoke project intended to support a phone remote and an Android TV playback screen, with local song-library browsing and karaoke playback.
 
 ## Project status
 
-Early prototype. The current screen can select a file and add its displayed name to a temporary queue; **media playback, automatic library scanning, persistent queue storage, and phone-to-TV networking are not implemented yet**.
+This project is a work in progress. The default `main` branch currently contains an early prototype. A separate repair branch may contain experimental playback work; treat it as unfinished until the build and real-device behavior have been verified.
+
+Planned capabilities include:
+
+- Full-screen MP4 karaoke playback using the video's own picture and audio.
+- MIDI/KAR playback with embedded lyrics and optional background video.
+- One searchable song list and queue for supported media types.
+- Phone remote for searching and reserving songs while TV playback continues.
+- Local Wi-Fi operation without requiring an internet connection.
+- Separate, purpose-built interfaces for phone and Android TV.
+
+## Contributing
+
+We welcome bug reports, documentation improvements, testing, and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md). Please be specific about device type, Android version, media format, expected behavior, and actual behavior. Do not upload copyrighted karaoke media or personal song libraries.
 
 ## Build
 
-Every push to `main` triggers the GitHub Actions workflow at `.github/workflows/android.yml`. After a successful run, open the workflow run and download the `KaraokeHome-debug-apk` artifact.
-
-The project uses Gradle, Android Gradle Plugin, Kotlin, and Java 17.
+The project uses Gradle, Kotlin, the Android Gradle Plugin, and Java 17. Pushes to `main` trigger the GitHub Actions Android build workflow. After a successful run, open the workflow run and download the `KaraokeHome-debug-apk` artifact.
 
 ## License
 
-License to be decided.
+Original project source code and documentation are licensed under Apache-2.0; see [LICENSE](LICENSE). Third-party assets may have separate terms. Read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistributing assets.
+
+## Current known limitations
+
+Do not assume MIDI/KAR lyric timing or word-by-word highlighting is implemented, or that MP4/BGV playback works correctly on every device. Those features require verification and contributions.
