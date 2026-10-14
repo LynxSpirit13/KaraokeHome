@@ -43,6 +43,8 @@ class MainActivity : Activity() {
     private var bgvPlayer: ExoPlayer? = null
     private var bgvPlayerView: PlayerView? = null
     private var mainNavigation: View? = null
+    private var shellHeader: View? = null
+    private var shellAccentLine: View? = null
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
     private var exoPlayer: ExoPlayer? = null
@@ -234,8 +236,10 @@ class MainActivity : Activity() {
         header.addView(branding, LinearLayout.LayoutParams(0, -2, 1f))
         headerStatus = label("READY", 10f, true, bright)
         header.addView(headerStatus)
+        shellHeader = header
         root.addView(header)
-        root.addView(View(this).apply { setBackgroundColor(red) }, LinearLayout.LayoutParams(-1, dp(2)))
+        shellAccentLine = View(this).apply { setBackgroundColor(red) }
+        root.addView(shellAccentLine, LinearLayout.LayoutParams(-1, dp(2)))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         mainNavigation = nav
         nav.addView(navButton("SONGS") { showLibrary() }, weight())
@@ -263,7 +267,7 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         content.setPadding(dp(24), dp(18), dp(24), dp(20))
         val grid = GridLayout(this).apply { columnCount = 3; rowCount = 3; useDefaultMargins = true }
@@ -314,7 +318,7 @@ class MainActivity : Activity() {
 
     private fun showRankings() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         content.addView(label("RANKINGS", 24f, true, white), lp(-1, -2, 8, 12))
         content.addView(label("Ranking statistics are not available yet. Start with the song library and reservation queue.", 16f, false, muted), lp(-1, -2, 0, 12))
@@ -322,7 +326,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLibrary() {
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         val hero = card()
         hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
@@ -590,6 +594,7 @@ class MainActivity : Activity() {
 
     private fun showNumberPad() {
         numberScreenActive = true
+        restoreShellChrome()
         mainNavigation?.visibility = View.GONE
         content.removeAllViews()
         content.setPadding(0, 0, 0, 0)
@@ -739,7 +744,7 @@ class MainActivity : Activity() {
 
     private fun showQueue() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         stopBgv()
         content.removeAllViews()
         content.addView(label("SONG RESERVATION QUEUE", 17f, true, white), lp(-1, -2, 4, 10))
@@ -765,7 +770,7 @@ class MainActivity : Activity() {
 
     private fun showSettings() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         stopBgv()
         content.removeAllViews()
         content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
@@ -801,35 +806,32 @@ class MainActivity : Activity() {
         else playMidiSong(song)
     }
 
+    @Suppress("DEPRECATION")
     private fun playVideo(song: Song) {
         numberScreenActive = false
+        activeSong = song
         stopBgv()
         stopMidi()
         safeStopVideo()
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.BLACK)
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }
-        root.addView(label("KARAOKE VIDEO  •  TRACK ${song.number}", 12f, true, bright), lp(-1, -2, 0, 3))
-        root.addView(label(song.title, 16f, true, white), lp(-1, -2, 0, 3))
-        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val playerView = PlayerView(this).apply {
             useController = false
             setShutterBackgroundColor(Color.BLACK)
+            setBackgroundColor(Color.BLACK)
             keepScreenOn = true
         }
         videoView = playerView
-        stage.addView(playerView, FrameLayout.LayoutParams(-1, -1))
-        root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(actionButton("LIBRARY", panel) { safeStopVideo(); showLibrary() }, weight())
-        controls.addView(actionButton("PAUSE", panel) { exoPlayer?.pause() }, weight())
-        controls.addView(actionButton("PLAY", red) { exoPlayer?.play() }, weight())
-        controls.addView(actionButton("STOP", panel) { safeStopVideo(); showLibrary() }, weight())
-        root.addView(controls, lp(-1, 44, 4))
+        root.addView(playerView, FrameLayout.LayoutParams(-1, -1))
         content.removeAllViews()
-        content.addView(root, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels - dp(105)).coerceAtLeast(dp(320))))
+        shellHeader?.visibility = View.GONE
+        shellAccentLine?.visibility = View.GONE
+        mainNavigation?.visibility = View.GONE
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        content.addView(root, LinearLayout.LayoutParams(-1, -1))
         headerStatus.text = "PREPARING VIDEO"
         try {
             val player = ExoPlayer.Builder(this).build()
@@ -852,7 +854,7 @@ class MainActivity : Activity() {
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     headerStatus.text = "VIDEO ERROR"
-                    message("This video could not be decoded. Try an MP4 encoded as H.264 video with AAC audio. Details: ${error.errorCodeName}")
+                    message("This video could not be decoded. Try an MP4 encoded as H.264 video with AAC audio. Details: \${error.errorCodeName}")
                 }
             })
             player.setMediaItem(MediaItem.fromUri(song.uri))
@@ -860,12 +862,14 @@ class MainActivity : Activity() {
             player.playWhenReady = true
         } catch (e: Exception) {
             safeStopVideo()
+            showLibrary()
             headerStatus.text = "VIDEO ERROR"
-            message("Could not open video: ${e.message ?: "unsupported media"}")
+            message("Could not open video: \${e.message ?: "unsupported media"}")
         }
     }
 
     private fun safeStopVideo() {
+        window.decorView.systemUiVisibility = 0
         try { exoPlayer?.stop() } catch (_: Exception) {}
         try { exoPlayer?.release() } catch (_: Exception) {}
         exoPlayer = null
@@ -1058,6 +1062,13 @@ class MainActivity : Activity() {
     }
 
     private fun updateHeader() { if (::headerStatus.isInitialized) headerStatus.text = "QUEUE ${queue.size}" }
+
+    private fun restoreShellChrome() {
+        window.decorView.systemUiVisibility = 0
+        shellHeader?.visibility = View.VISIBLE
+        shellAccentLine?.visibility = View.VISIBLE
+        mainNavigation?.visibility = View.VISIBLE
+    }
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(14)); setBackgroundColor(panel)
