@@ -45,6 +45,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
+        loadSavedLibrary()
         showHome()
     }
 
@@ -81,9 +82,7 @@ class MainActivity : Activity() {
             }
             android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 if (numberEntry.isNotEmpty()) {
-                    val song = songs.firstOrNull { it.number.trimStart('0') == numberEntry.trimStart('0') || it.number == numberEntry }
-                    if (song != null) { activeSong = song; playSong(song); return true }
-                    message("Track number not found.")
+                    playEnteredNumber()
                     return true
                 }
             }
@@ -157,6 +156,17 @@ class MainActivity : Activity() {
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+    }
+
+    private fun loadSavedLibrary() {
+        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("home_tree_uri", null) ?: return
+        try {
+            val tree = Uri.parse(saved)
+            songs.clear()
+            scanTree(tree, DocumentsContract.getTreeDocumentId(tree), 0)
+            songs.sortBy { it.title.lowercase() }
+            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+        } catch (_: Exception) { songs.clear() }
     }
 
     private fun showHome() {
@@ -365,8 +375,9 @@ class MainActivity : Activity() {
                 message("SoundFont selected. It will be used for the next MIDI/KAR playback.")
             } catch (e: Exception) { message("Could not load SoundFont: ${e.message ?: "invalid file"}") }
         } else if (requestCode == REQUEST_PICK_BGV) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("bgv_uri", uri.toString()).apply()
-            message("BGV file saved as a preference. Actual MIDI/KAR background-video playback is not implemented yet.")
+            if (numberScreenActive) showNumberPad() else message("BGV saved. Open Enter Karaoke to preview it.")
         }
     }
 
@@ -411,7 +422,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.argb(if (bgvUri != null) 125 else 255, 4, 5, 24))
         }
         shade.addView(label("ENTER SONG", 30f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
-        numberDisplay = label(numberEntry.padEnd(7, '0').take(7), 46f, true, white).apply {
+        numberDisplay = label(numberEntry.padStart(7, '0').takeLast(7), 46f, true, white).apply {
             gravity = Gravity.CENTER; setPadding(dp(18), dp(10), dp(18), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(Color.argb(190, 15, 13, 40)); cornerRadius = dp(12).toFloat()
@@ -428,11 +439,11 @@ class MainActivity : Activity() {
         shade.addView(buttons, lp(-1, 50))
         shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 44, 10))
         stage.addView(shade, FrameLayout.LayoutParams(-1, -1))
-        content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+        content.addView(stage, LinearLayout.LayoutParams(-1, dp(620)))
     }
 
     private fun updateNumberDisplay() {
-        numberDisplay?.text = numberEntry.padEnd(7, '0').take(7)
+        numberDisplay?.text = numberEntry.padStart(7, '0').takeLast(7)
     }
 
     private fun playEnteredNumber() {
