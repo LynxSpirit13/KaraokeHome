@@ -8,6 +8,9 @@ import android.database.Cursor
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.view.Gravity
 import android.view.View
@@ -44,6 +47,17 @@ class MainActivity : Activity() {
     private var numberDisplay: TextView? = null
     private var numberScreenActive = false
     private var activeLyrics: String = ""
+    private var timedLyrics: List<MidiEmbeddedLyrics.TimedLyric> = emptyList()
+    private var lyricsPlaybackView: TextView? = null
+    private var lyricStartedAt: Long = 0L
+    private val lyricHandler = Handler(Looper.getMainLooper())
+    private val lyricHighlighter = object : Runnable {
+        override fun run() {
+            if (midiPlayer == null || timedLyrics.isEmpty()) return
+            renderTimedLyrics()
+            lyricHandler.postDelayed(this, 80L)
+        }
+    }
     private var bgvPlayer: ExoPlayer? = null
     private var bgvPlayerView: PlayerView? = null
     private var mainNavigation: View? = null
@@ -183,7 +197,8 @@ class MainActivity : Activity() {
             in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
                 numberEntry = (numberEntry + digit).take(7)
-                if (numberScreenActive) updateNumberDisplay() else showNumberPad()
+                if (isTelevisionUi()) headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
+                else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                 return true
             }
             android.view.KeyEvent.KEYCODE_PROG_RED -> {
@@ -210,7 +225,14 @@ class MainActivity : Activity() {
             }
             android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 if (numberEntry.isNotEmpty()) {
-                    playEnteredNumber()
+                    if (isTelevisionUi() && (exoPlayer != null || midiPlayer != null)) {
+                        reserveEnteredNumber()
+                        numberEntry = ""
+                        headerStatus.text = "RESERVED • QUEUE " + queue.size
+                    } else {
+                        playEnteredNumber()
+                        numberEntry = ""
+                    }
                     return true
                 }
             }
@@ -737,7 +759,15 @@ class MainActivity : Activity() {
 
     private fun sameSong(a: Song, b: Song): Boolean = a.uri == b.uri && a.zipEntry == b.zipEntry
 
+    private fun isTelevisionUi(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+
     private fun showNumberPad() {
+        if (isTelevisionUi()) {
+            numberScreenActive = false
+            headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
+            return
+        }
         numberScreenActive = true
         restoreShellChrome()
         mainNavigation?.visibility = View.GONE
@@ -751,12 +781,12 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(12), dp(16), dp(12))
             setBackgroundColor(Color.argb(if (bgvUri != null) 125 else 255, 4, 5, 24))
         }
-        shade.addView(label("ENTER SONG", 30f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
-        numberDisplay = label(numberEntry.padStart(7, '0').takeLast(7), 46f, true, white).apply {
+        shade.addView(label("Select a Song", 25f, true, Color.rgb(255, 220, 0)).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 4))
+        numberDisplay = label(numberEntry.padStart(7, '0').takeLast(7), 38f, true, Color.rgb(255, 225, 0)).apply {
             gravity = Gravity.CENTER; setPadding(dp(18), dp(10), dp(18), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.argb(190, 15, 13, 40)); cornerRadius = dp(12).toFloat()
-                setStroke(dp(2), Color.rgb(220, 100, 175))
+                setColor(Color.rgb(12, 12, 18)); cornerRadius = dp(4).toFloat()
+                setStroke(dp(2), Color.rgb(230, 190, 0))
             }
         }
         shade.addView(numberDisplay, lp(-1, -2, 0, 14))
@@ -791,7 +821,7 @@ class MainActivity : Activity() {
             }
             shade.addView(entry, lp(-1, 52, 0, 10))
             val keypad = GridLayout(this).apply { columnCount = 3; rowCount = 4 }
-            val keys = listOf("1","2","3","4","5","6","7","8","9","⌫","0","CLEAR")
+            val keys = listOf("1","2","3","4","5","6","7","8","9","CLEAR","0","⌫")
             keys.forEach { key ->
                 val button = actionButton(key, panel) {
                     when (key) {
@@ -806,12 +836,12 @@ class MainActivity : Activity() {
                     updateNumberDisplay()
                 }
                 val p = GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
-                    width = 0; height = dp(44); setMargins(dp(3), dp(3), dp(3), dp(3))
+                    width = 0; height = dp(42); setMargins(dp(3), dp(2), dp(3), dp(2))
                 }
                 keypad.addView(button, p)
             }
             shade.addView(keypad, lp(-1, -2, 0, 8))
-            shade.addView(label("Use the keypad or tap the field to open your phone keyboard.", 12f, false, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 8))
+            shade.addView(label("Touch a number or use your phone keyboard.", 11f, false, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 4))
         } else {
             shade.addView(label("ENTER TRACK NUMBER  •  OK TO PLAY  •  GREEN FOR QUEUE", 13f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
         }
