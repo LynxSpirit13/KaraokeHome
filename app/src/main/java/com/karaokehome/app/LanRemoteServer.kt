@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
+import java.io.OutputStreamWriter
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -84,7 +85,7 @@ class LanRemoteServer(
             socket.soTimeout = 5000
             try {
                 val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-                val writer = PrintWriter(socket.getOutputStream(), true, Charsets.UTF_8)
+                val writer = PrintWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8), true)
                 val line = reader.readLine() ?: return
                 val request = JSONObject(line)
                 val latch = CountDownLatch(1)
