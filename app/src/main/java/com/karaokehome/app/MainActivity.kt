@@ -35,7 +35,8 @@ class MainActivity : Activity() {
     private var numberEntry = ""
     private var numberDisplay: TextView? = null
     private var numberScreenActive = false
-    private var bgvView: VideoView? = null
+    private var bgvPlayer: ExoPlayer? = null
+    private var bgvPlayerView: PlayerView? = null
     private var mainNavigation: View? = null
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
@@ -111,7 +112,7 @@ class MainActivity : Activity() {
     private fun showBgvOptions() {
         AlertDialog.Builder(this)
             .setTitle("Background video (BGV)")
-            .setMessage("BGV playback for MIDI/KAR is not implemented yet. You can choose a video file now, but it will not be composited behind MIDI lyrics until the BGV player is added.")
+            .setMessage("Choose an MP4 to loop silently behind MIDI/KAR playback. BGV audio is muted so the MIDI soundtrack remains audible.")
             .setPositiveButton("CHOOSE VIDEO") { _, _ ->
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -120,7 +121,7 @@ class MainActivity : Activity() {
             }
             .setNeutralButton("DISABLE BGV") { _, _ ->
                 getSharedPreferences("karaokehome", MODE_PRIVATE).edit().remove("bgv_uri").apply()
-                message("BGV preference cleared. MIDI/KAR background-video playback is not available in this build yet.")
+                message("Background video disabled.")
             }
             .setNegativeButton("CANCEL", null)
             .show()
@@ -512,14 +513,7 @@ class MainActivity : Activity() {
         content.setPadding(0, 0, 0, 0)
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val bgvUri = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("bgv_uri", null)?.let { Uri.parse(it) }
-        if (bgvUri != null) {
-            val bgv = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
-            bgvView = bgv
-            stage.addView(bgv, FrameLayout.LayoutParams(-1, -1))
-            bgv.setOnPreparedListener { mp -> mp.isLooping = true; bgv.start(); headerStatus.text = "BGV PLAYING" }
-            bgv.setOnErrorListener { _, _, _ -> headerStatus.text = "BGV UNAVAILABLE"; true }
-            try { bgv.setVideoURI(bgvUri) } catch (_: Exception) { headerStatus.text = "BGV UNAVAILABLE" }
-        }
+        if (bgvUri != null) startBgv(stage, bgvUri)
         val shade = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             setPadding(dp(28), dp(24), dp(28), dp(24))
@@ -623,9 +617,43 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show()
     }
 
+    private fun startBgv(stage: FrameLayout, uri: Uri) {
+        stopBgv()
+        try {
+            val view = PlayerView(this).apply {
+                useController = false
+                setUseTextureView(true)
+                setShutterBackgroundColor(Color.TRANSPARENT)
+                setBackgroundColor(Color.TRANSPARENT)
+                keepScreenOn = true
+            }
+            val player = ExoPlayer.Builder(this).build()
+            player.volume = 0f
+            player.repeatMode = Player.REPEAT_MODE_ONE
+            bgvPlayerView = view
+            bgvPlayer = player
+            view.player = player
+            stage.addView(view, 0, FrameLayout.LayoutParams(-1, -1))
+            player.addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    headerStatus.text = "BGV UNAVAILABLE"
+                }
+            })
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
+            player.playWhenReady = true
+        } catch (_: Exception) {
+            stopBgv()
+            headerStatus.text = "BGV UNAVAILABLE"
+        }
+    }
+
     private fun stopBgv() {
-        try { bgvView?.stopPlayback() } catch (_: Exception) {}
-        bgvView = null
+        try { bgvPlayer?.stop() } catch (_: Exception) {}
+        try { bgvPlayer?.release() } catch (_: Exception) {}
+        bgvPlayer = null
+        bgvPlayerView?.player = null
+        bgvPlayerView = null
     }
 
     private fun showQueue() {
@@ -668,7 +696,7 @@ class MainActivity : Activity() {
         c.addView(label("Shared library: existing SongHub folder • no duplicate media storage", 12f, false, muted), lp(-1, -2, 8))
         c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
         c.addView(label("PLAYBACK", 11f, true, bright))
-        c.addView(label("MP4 video: Android-supported video/audio codecs. MIDI/KAR: bundled SoundFont playback. Lyrics, scoring, microphone mixing, separate BGV overlays, and network phone-to-TV pairing are not implemented yet.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(label("MP4 video uses the device video decoder. MIDI/KAR uses the bundled SoundFont. For external lyrics, place a same-name .LRC or .TXT file beside the MIDI/KAR file. Timed lyric rendering and phone-to-TV pairing still need further work.", 13f, false, muted), lp(-1, -2, 6))
         c.addView(actionButton("PICK MP4 VIDEO", panel) { chooseVideoFile() }, lp(-1, 44, 10))
         c.addView(actionButton("PICK MIDI / KAR FILE", panel) { chooseMidiFile() }, lp(-1, 44, 8))
         c.addView(actionButton("STOP PLAYBACK", panel) { stopPlayback() }, lp(-1, 44, 8))
@@ -706,6 +734,7 @@ class MainActivity : Activity() {
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val playerView = PlayerView(this).apply {
             useController = false
+            setUseTextureView(true)
             setShutterBackgroundColor(Color.BLACK)
             keepScreenOn = true
         }
@@ -719,7 +748,7 @@ class MainActivity : Activity() {
         controls.addView(actionButton("STOP", panel) { safeStopVideo(); showLibrary() }, weight())
         root.addView(controls, lp(-1, 44, 4))
         content.removeAllViews()
-        content.addView(root, LinearLayout.LayoutParams(-1, -1))
+        content.addView(root, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels - dp(105)).coerceAtLeast(dp(320))))
         headerStatus.text = "PREPARING VIDEO"
         try {
             val player = ExoPlayer.Builder(this).build()
@@ -823,17 +852,7 @@ class MainActivity : Activity() {
 
             val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
             val bgvUri = prefs.getString("bgv_uri", null)?.let { Uri.parse(it) }
-            if (bgvUri != null) {
-                val bgv = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
-                bgvView = bgv
-                stage.addView(bgv, FrameLayout.LayoutParams(-1, -1))
-                bgv.setOnPreparedListener { mp ->
-                    try { mp.isLooping = true; bgv.start(); headerStatus.text = "PLAYING MIDI • BGV" }
-                    catch (_: Exception) { headerStatus.text = "PLAYING MIDI" }
-                }
-                bgv.setOnErrorListener { _, _, _ -> headerStatus.text = "PLAYING MIDI • BGV UNAVAILABLE"; true }
-                try { bgv.setVideoURI(bgvUri) } catch (_: Exception) { headerStatus.text = "PLAYING MIDI" }
-            }
+            if (bgvUri != null) startBgv(stage, bgvUri)
 
             val overlay = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -842,9 +861,9 @@ class MainActivity : Activity() {
             }
             overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
             overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
-            val savedLyrics = getCorrectedLyrics(song)
+            val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() } ?: loadSiblingLyrics(song)
             overlay.addView(label(savedLyrics?.takeIf { it.isNotBlank() }
-                ?: "Instrumental playback is active. Add corrected lyrics for this song to display them here.", 16f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 10))
+                ?: "No matching lyrics file found. Add a same-name .LRC/.TXT file or use Edit Lyrics.", 16f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 10))
             overlay.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 44, 12))
             val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             controls.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, weight())
@@ -861,7 +880,8 @@ class MainActivity : Activity() {
             }, lp(-1, 42, 8))
             stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
             content.removeAllViews()
-            content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+            mainNavigation?.visibility = View.GONE
+            content.addView(stage, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels - dp(105)).coerceAtLeast(dp(320))))
             player.play {
                 runOnUiThread {
                     headerStatus.text = "FINISHED"
