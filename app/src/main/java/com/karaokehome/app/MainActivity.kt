@@ -842,6 +842,14 @@ class MainActivity : Activity() {
                         entry.setSelection(entry.text.length)
                     }
                     updateNumberDisplay()
+                }.apply {
+                    textSize = 20f
+                    setTextColor(if (key == "CLEAR") Color.WHITE else Color.rgb(255, 225, 0))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(if (key == "CLEAR") Color.rgb(130, 22, 28) else Color.rgb(31, 33, 42))
+                        cornerRadius = dp(5).toFloat()
+                        setStroke(dp(1), Color.rgb(95, 95, 105))
+                    }
                 }
                 val p = GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
                     width = 0; height = dp(42); setMargins(dp(3), dp(2), dp(3), dp(2))
