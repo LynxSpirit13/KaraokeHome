@@ -27,6 +27,9 @@ class MainActivity : Activity() {
     private var filter = "ALL"
     private var query = ""
     private var numberEntry = ""
+    private var numberDisplay: TextView? = null
+    private var numberScreenActive = false
+    private var bgvView: VideoView? = null
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
     private lateinit var video: VideoView
@@ -42,7 +45,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
-        showLibrary()
+        showHome()
     }
 
     // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
@@ -50,8 +53,8 @@ class MainActivity : Activity() {
         when (keyCode) {
             in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
-                numberEntry = (numberEntry + digit).take(6)
-                showNumberPad()
+                numberEntry = (numberEntry + digit).take(7)
+                if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                 return true
             }
             android.view.KeyEvent.KEYCODE_PROG_RED -> {
@@ -78,19 +81,21 @@ class MainActivity : Activity() {
             }
             android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 if (numberEntry.isNotEmpty()) {
-                    val song = songs.firstOrNull { it.number == numberEntry }
+                    val song = songs.firstOrNull { it.number.trimStart('0') == numberEntry.trimStart('0') || it.number == numberEntry }
                     if (song != null) { activeSong = song; playSong(song); return true }
+                    message("Track number not found.")
+                    return true
                 }
             }
             android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL -> {
                 if (numberEntry.isNotEmpty()) {
                     numberEntry = numberEntry.dropLast(1)
-                    showNumberPad()
+                    if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                     return true
                 }
             }
             android.view.KeyEvent.KEYCODE_ESCAPE, android.view.KeyEvent.KEYCODE_BACK -> {
-                if (numberEntry.isNotEmpty()) { numberEntry = ""; showNumberPad(); return true }
+                if (numberEntry.isNotEmpty()) { numberEntry = ""; if (numberScreenActive) updateNumberDisplay() else showNumberPad(); return true }
             }
         }
         return super.onKeyDown(keyCode, event)
@@ -154,46 +159,67 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun showLibrary() {
+    private fun showHome() {
+        numberScreenActive = false
         content.removeAllViews()
-        val hero = card()
-        hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
-        hero.addView(label("Pick a song. Grab the mic. Sing together.", 18f, true, white), lp(-1, -2, 8))
-        hero.addView(label("One library for your video and classic karaoke files.", 12f, false, muted), lp(-1, -2, 5))
-        hero.addView(actionButton("＋  SCAN LIBRARY FOLDER", red) { chooseFolder() }, lp(-1, 46, 12))
-        content.addView(hero, lp(-1, -2, 0, 10))
-
-        val search = EditText(this).apply {
-            hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
-            setSingleLine(true); setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
-            setText(query)
-            tag = "songSearch"
-            addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString() ?: ""; renderSongRows() }
-                override fun afterTextChanged(s: android.text.Editable?) {}
-            })
+        content.setPadding(dp(24), dp(18), dp(24), dp(20))
+        val grid = GridLayout(this).apply { columnCount = 3; rowCount = 2; useDefaultMargins = true }
+        fun tile(title: String, symbol: String, color: Int, row: Int, col: Int, span: Int = 1, action: () -> Unit) {
+            val b = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                background = android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                    intArrayOf(color, blend(color, Color.WHITE, 0.20f))
+                ).apply { cornerRadius = dp(22).toFloat(); setStroke(dp(2), Color.argb(180, 235, 190, 225)) }
+                isFocusable = true; isClickable = true; setOnClickListener { action() }
+                addView(TextView(this@MainActivity).apply { text = symbol; textSize = 42f; setTextColor(white); gravity = Gravity.CENTER })
+                addView(TextView(this@MainActivity).apply { text = title; textSize = 18f; setTextColor(white); gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) })
+            }
+            val params = GridLayout.LayoutParams(GridLayout.spec(row, 1f), GridLayout.spec(col, span, 1f)).apply {
+                width = 0; height = dp(if (span == 2) 170 else 145); setMargins(dp(5), dp(5), dp(5), dp(5))
+            }
+            grid.addView(b, params)
         }
-        content.addView(search, lp(-1, 46, 0, 8))
-        val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("ALL", "MP4", "MIDI", "KAR").forEach { f ->
-            filters.addView(actionButton(f, if (filter == f) red else panel) { filter = f; showLibrary() }, weight().apply { rightMargin = dp(4) })
-        }
-        content.addView(filters, lp(-1, 38, 0, 8))
-        val listCard = card()
-        val columns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(Color.rgb(34, 11, 16)) }
-        columns.addView(label("TRACK", 10f, true, muted), LinearLayout.LayoutParams(dp(60), -2))
-        columns.addView(label("SONG TITLE", 10f, true, muted), LinearLayout.LayoutParams(0, -2, 1f))
-        columns.addView(label("TYPE", 10f, true, muted), LinearLayout.LayoutParams(dp(42), -2))
-        listCard.addView(columns)
-        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        rows.tag = "songRows"
-        listCard.addView(rows)
-        content.addView(listCard)
-        content.addView(label("Tap a song to play • Long-press to reserve", 11f, false, muted), lp(-1, -2, 8))
-        renderSongRows()
+        tile("ENTER KARAOKE", "♫", Color.rgb(155, 25, 90), 0, 0, 2) { numberEntry = ""; showNumberPad() }
+        tile("MEDIA PLAYER", "▣", Color.rgb(105, 40, 145), 0, 2) { showLibrary() }
+        tile("RANKINGS", "🏆", Color.rgb(30, 80, 155), 1, 2) { showRankings() }
+        tile("SONG SEARCH", "♫⌕", Color.rgb(160, 55, 40), 1, 0) { showLibrary() }
+        tile("ARTIST SEARCH", "♟⌕", Color.rgb(170, 120, 35), 1, 1) { showLibrary() }
+        tile("NEW SONGS", "♫", Color.rgb(25, 105, 65), 1, 2) { showLibrary() }
+        // Keep the reference's colorful tile layout while offering simple access to settings.
+        content.addView(TextView(this).apply {
+            text = "KaraokeHome"; textSize = 30f; setTextColor(white); gravity = Gravity.CENTER
+            setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, dp(4), 0, dp(10))
+        }, lp(-1, -2))
+        content.addView(grid, lp(-1, -2))
+        val footer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        footer.addView(actionButton("⚙ SETTINGS", panel) { showSettings() }, weight())
+        footer.addView(actionButton("SONG LIBRARY", panel) { showLibrary() }, weight())
+        footer.addView(actionButton("RESERVED SONGS", panel) { showQueue() }, weight())
+        content.addView(footer, lp(-1, 48, 8))
+        content.setPadding(dp(12), dp(8), dp(12), dp(12))
     }
 
+    private fun blend(a: Int, b: Int, fraction: Float): Int {
+        val inv = 1f - fraction
+        return Color.rgb((Color.red(a) * inv + Color.red(b) * fraction).toInt(),
+            (Color.green(a) * inv + Color.green(b) * fraction).toInt(),
+            (Color.blue(a) * inv + Color.blue(b) * fraction).toInt())
+    }
+
+    private fun showRankings() {
+        numberScreenActive = false
+        content.removeAllViews()
+        content.addView(label("RANKINGS", 24f, true, white), lp(-1, -2, 8, 12))
+        content.addView(label("Ranking statistics are not available yet. Start with the song library and reservation queue.", 16f, false, muted), lp(-1, -2, 0, 12))
+        content.addView(actionButton("BACK HOME", red) { showHome() }, lp(-1, 48, 8))
+    }
+
+    private fun showLibrary() {
+        numberScreenActive = false
+        content.setPadding(dp(12), dp(4), dp(12), dp(16))
     private fun renderSongRows() {
         val rows = content.findViewWithTag<LinearLayout>("songRows") ?: return
         rows.removeAllViews()
@@ -329,39 +355,76 @@ class MainActivity : Activity() {
     }
 
     private fun showNumberPad() {
+        numberScreenActive = true
         content.removeAllViews()
-        content.addView(label("KARAOKE MODE", 12f, true, bright), lp(-1, -2, 4, 8))
-        content.addView(label("Enter a six-digit track number", 15f, false, muted), lp(-1, -2, 0, 12))
-        val numberPanel = card()
-        val display = label(numberEntry.ifEmpty { "______" }, 34f, true, white).apply { gravity = Gravity.CENTER; setBackgroundColor(Color.rgb(40, 8, 15)); setPadding(dp(8), dp(16), dp(8), dp(16)) }
-        numberPanel.addView(display, lp(-1, -2))
-        val keys = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
-        val keypad = listOf(listOf("1","2","3"), listOf("4","5","6"), listOf("7","8","9"), listOf("CLR","0","⌫"))
-        keypad.forEach { group ->
-            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            group.forEach { key -> r.addView(actionButton(key, panel) {
-                numberEntry = when (key) { "CLR" -> ""; "⌫" -> numberEntry.dropLast(1); else -> if (numberEntry.length < 6) numberEntry + key else numberEntry }
-                display.text = numberEntry.ifEmpty { "______" }
-            }, weight().apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }) }
-            keys.addView(r)
+        content.setPadding(0, 0, 0, 0)
+        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val bgvUri = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("bgv_uri", null)?.let { Uri.parse(it) }
+        if (bgvUri != null) {
+            val bgv = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
+            bgvView = bgv
+            stage.addView(bgv, FrameLayout.LayoutParams(-1, -1))
+            bgv.setOnPreparedListener { mp -> mp.isLooping = true; bgv.start(); headerStatus.text = "BGV PLAYING" }
+            bgv.setOnErrorListener { _, _, _ -> headerStatus.text = "BGV UNAVAILABLE"; true }
+            try { bgv.setVideoURI(bgvUri) } catch (_: Exception) { headerStatus.text = "BGV UNAVAILABLE" }
         }
-        numberPanel.addView(keys)
-        numberPanel.addView(actionButton("OK  •  PLAY TRACK", red) {
-            val song = songs.firstOrNull { it.number == numberEntry }
-            if (song == null) message("Track number not found. Scan your library or enter a number shown in the song list.")
-            else { activeSong = song; playSong(song) }
-        }, lp(-1, 48, 8))
-        numberPanel.addView(actionButton("RESERVE TRACK", Color.rgb(55, 35, 42)) {
-            val song = songs.firstOrNull { it.number == numberEntry }
-            if (song == null) message("Track number not found.") else {
-                if (queue.none { it.uri == song.uri }) queue.add(song)
-                updateHeader(); message("Added to reservation queue.")
+        val shade = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            setPadding(dp(28), dp(24), dp(28), dp(24))
+            setBackgroundColor(Color.argb(if (bgvUri != null) 125 else 255, 4, 5, 24))
+        }
+        shade.addView(label("ENTER SONG", 30f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
+        numberDisplay = label(numberEntry.padEnd(7, '0').take(7), 46f, true, white).apply {
+            gravity = Gravity.CENTER; setPadding(dp(18), dp(10), dp(18), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.argb(190, 15, 13, 40)); cornerRadius = dp(12).toFloat()
+                setStroke(dp(2), Color.rgb(220, 100, 175))
             }
-        }, lp(-1, 44, 8))
-        content.addView(numberPanel)
+        }
+        shade.addView(numberDisplay, lp(-1, -2, 0, 14))
+        shade.addView(label("ENTER TRACK NUMBER  •  OK TO PLAY  •  GREEN FOR QUEUE", 13f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        buttons.addView(actionButton("⌫", panel) { if (numberEntry.isNotEmpty()) numberEntry = numberEntry.dropLast(1); updateNumberDisplay() }, weight())
+        buttons.addView(actionButton("CLEAR", panel) { numberEntry = ""; updateNumberDisplay() }, weight())
+        buttons.addView(actionButton("PLAY", red) { playEnteredNumber() }, weight())
+        buttons.addView(actionButton("RESERVE", Color.rgb(40, 90, 150)) { reserveEnteredNumber() }, weight())
+        shade.addView(buttons, lp(-1, 50))
+        shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 44, 10))
+        stage.addView(shade, FrameLayout.LayoutParams(-1, -1))
+        content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+    }
+
+    private fun updateNumberDisplay() {
+        numberDisplay?.text = numberEntry.padEnd(7, '0').take(7)
+    }
+
+    private fun playEnteredNumber() {
+        val key = numberEntry.trimStart('0')
+        val song = songs.firstOrNull { it.number.trimStart('0') == key || it.number == numberEntry }
+        if (song == null) { message("Track number not found. Scan your song library first."); return }
+        numberScreenActive = false
+        stopBgv()
+        activeSong = song
+        playSong(song)
+    }
+
+    private fun reserveEnteredNumber() {
+        val key = numberEntry.trimStart('0')
+        val song = songs.firstOrNull { it.number.trimStart('0') == key || it.number == numberEntry }
+        if (song == null) { message("Track number not found. Scan your song library first."); return }
+        if (queue.none { it.uri == song.uri }) queue.add(song)
+        updateHeader()
+        Toast.makeText(this, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopBgv() {
+        try { bgvView?.stopPlayback() } catch (_: Exception) {}
+        bgvView = null
     }
 
     private fun showQueue() {
+        numberScreenActive = false
+        stopBgv()
         content.removeAllViews()
         content.addView(label("SONG RESERVATION QUEUE", 17f, true, white), lp(-1, -2, 4, 10))
         content.addView(label("${queue.size} reserved song(s)", 12f, false, muted), lp(-1, -2, 0, 10))
@@ -385,6 +448,8 @@ class MainActivity : Activity() {
     }
 
     private fun showSettings() {
+        numberScreenActive = false
+        stopBgv()
         content.removeAllViews()
         content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
         val c = card()
@@ -419,6 +484,8 @@ class MainActivity : Activity() {
     }
 
     private fun playVideo(song: Song) {
+        numberScreenActive = false
+        stopBgv()
         stopMidi()
         try {
             if (videoInitialized()) {
@@ -541,6 +608,8 @@ class MainActivity : Activity() {
     }
 
     private fun playMidiSong(song: Song) {
+        numberScreenActive = false
+        stopBgv()
         stopMidi()
         try {
             val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
@@ -624,6 +693,8 @@ class MainActivity : Activity() {
     }
 
     private fun stopPlayback() {
+        stopBgv()
+        numberScreenActive = false
         try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
         stopMidi()
         headerStatus.text = "READY"
