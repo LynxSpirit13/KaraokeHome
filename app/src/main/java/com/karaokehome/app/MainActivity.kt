@@ -197,8 +197,10 @@ class MainActivity : Activity() {
             in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
                 numberEntry = (numberEntry + digit).take(7)
-                if (isTelevisionUi()) headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
-                else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
+                if (isTelevisionUi()) {
+                    headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
+                    Toast.makeText(this, "TRACK  " + numberEntry.padStart(7, '0'), Toast.LENGTH_SHORT).show()
+                } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                 return true
             }
             android.view.KeyEvent.KEYCODE_PROG_RED -> {
@@ -212,7 +214,11 @@ class MainActivity : Activity() {
                 return true
             }
             android.view.KeyEvent.KEYCODE_PROG_GREEN -> {
-                showQueue()
+                if (isTelevisionUi() && numberEntry.isNotEmpty()) {
+                    reserveEnteredNumber()
+                    numberEntry = ""
+                    headerStatus.text = "RESERVED • QUEUE " + queue.size
+                } else showQueue()
                 return true
             }
             android.view.KeyEvent.KEYCODE_PROG_YELLOW -> {
@@ -790,7 +796,7 @@ class MainActivity : Activity() {
             }
         }
         shade.addView(numberDisplay, lp(-1, -2, 0, 14))
-        val phoneLayout = resources.configuration.screenWidthDp < 600
+        val phoneLayout = !isTelevisionUi()
         if (phoneLayout) {
             val entry = EditText(this).apply {
                 hint = "Type song number"
@@ -845,16 +851,61 @@ class MainActivity : Activity() {
         } else {
             shade.addView(label("ENTER TRACK NUMBER  •  OK TO PLAY  •  GREEN FOR QUEUE", 13f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
         }
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        buttons.addView(actionButton("⌫", panel) { if (numberEntry.isNotEmpty()) numberEntry = numberEntry.dropLast(1); updateNumberDisplay() }, weight())
-        buttons.addView(actionButton("CLEAR", panel) { numberEntry = ""; updateNumberDisplay() }, weight())
-        buttons.addView(actionButton("PLAY", red) { playEnteredNumber() }, weight())
-        buttons.addView(actionButton("RESERVE", Color.rgb(40, 90, 150)) { reserveEnteredNumber() }, weight())
-        shade.addView(buttons, lp(-1, 50, 0, 6))
-        shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 44, 10))
+        val transport = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        transport.addView(actionButton("SEARCH", Color.rgb(43, 47, 59)) { stopBgv(); showLibrary() }, weight())
+        transport.addView(actionButton("PREV", Color.rgb(43, 47, 59)) { playPreviousSong() }, weight())
+        transport.addView(actionButton("PLAY", red) { playEnteredNumber() }, weight())
+        transport.addView(actionButton("NEXT", Color.rgb(43, 47, 59)) { playNextSong() }, weight())
+        transport.addView(actionButton("STOP", Color.rgb(43, 47, 59)) { stopPlayback(); showLibrary() }, weight())
+        shade.addView(transport, lp(-1, 44, 0, 5))
+
+        val reservations = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        reservations.addView(actionButton("RES", Color.rgb(31, 83, 120)) {
+            reserveEnteredNumber()
+            numberEntry = ""
+            updateNumberDisplay()
+        }, weight())
+        reservations.addView(actionButton("RSV LIST", Color.rgb(31, 83, 120)) { showQueue() }, weight())
+        reservations.addView(actionButton("1st RSV", Color.rgb(31, 83, 120)) {
+            if (queue.isEmpty()) message("Reservation list is empty.")
+            else { val next = queue.removeAt(0); updateHeader(); playSong(next) }
+        }, weight())
+        reservations.addView(actionButton("CANCEL", Color.rgb(100, 28, 35)) {
+            stopBgv()
+            numberEntry = ""
+            showLibrary()
+        }, weight())
+        shade.addView(reservations, lp(-1, 44, 0, 5))
+
+        val toneControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        toneControls.addView(actionButton("KEY −", Color.rgb(43, 47, 59)) { adjustKaraokeSetting("key", -1) }, weight())
+        toneControls.addView(actionButton("KEY +", Color.rgb(43, 47, 59)) { adjustKaraokeSetting("key", 1) }, weight())
+        toneControls.addView(actionButton("TEMPO −", Color.rgb(43, 47, 59)) { adjustKaraokeSetting("tempo", -1) }, weight())
+        toneControls.addView(actionButton("TEMPO +", Color.rgb(43, 47, 59)) { adjustKaraokeSetting("tempo", 1) }, weight())
+        toneControls.addView(actionButton("MELODY", Color.rgb(43, 47, 59)) { toggleMelody() }, weight())
+        shade.addView(toneControls, lp(-1, 40, 0, 5))
+        shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 40, 5))
         stage.addView(shade, FrameLayout.LayoutParams(-1, -1))
         content.minimumHeight = resources.displayMetrics.heightPixels
         content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+    }
+
+    private fun adjustKaraokeSetting(name: String, delta: Int) {
+        val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
+        val key = "karaoke_" + name
+        val current = prefs.getInt(key, 0)
+        val next = if (name == "tempo") (current + delta * 5).coerceIn(-30, 30) else (current + delta).coerceIn(-6, 6)
+        prefs.edit().putInt(key, next).apply()
+        message(name.uppercase() + ": " + (if (next > 0) "+" else "") + next +
+            (if (name == "tempo") "%" else " semitones") +
+            ". Saved setting; live adjustment requires synthesizer support.")
+    }
+
+    private fun toggleMelody() {
+        val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
+        val enabled = !prefs.getBoolean("karaoke_melody_enabled", true)
+        prefs.edit().putBoolean("karaoke_melody_enabled", enabled).apply()
+        message(if (enabled) "Melody guide preference enabled." else "Melody guide preference disabled.")
     }
 
     private fun updateNumberDisplay() {
