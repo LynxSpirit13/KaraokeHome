@@ -622,7 +622,6 @@ class MainActivity : Activity() {
         try {
             val view = PlayerView(this).apply {
                 useController = false
-                setUseTextureView(true)
                 setShutterBackgroundColor(Color.TRANSPARENT)
                 setBackgroundColor(Color.TRANSPARENT)
                 keepScreenOn = true
@@ -734,7 +733,6 @@ class MainActivity : Activity() {
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val playerView = PlayerView(this).apply {
             useController = false
-            setUseTextureView(true)
             setShutterBackgroundColor(Color.BLACK)
             keepScreenOn = true
         }
