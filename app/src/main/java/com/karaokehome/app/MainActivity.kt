@@ -1265,11 +1265,13 @@ class MainActivity : Activity() {
             }
             overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
             overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
-            val embeddedLyrics = MidiEmbeddedLyrics.extract(midi)
+            val timedFromMidi = MidiEmbeddedLyrics.extractTimed(midi)
+            val embeddedLyrics = timedFromMidi.joinToString("") { it.text }.trim().takeIf { it.isNotBlank() }
             val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() }
                 ?: loadSiblingLyrics(song)?.takeIf { it.isNotBlank() }
                 ?: embeddedLyrics
             activeLyrics = savedLyrics.orEmpty()
+            timedLyrics = if (!embeddedLyrics.isNullOrBlank() && savedLyrics == embeddedLyrics) timedFromMidi else emptyList()
             val lyricsView = label(savedLyrics?.takeIf { it.isNotBlank() }
                 ?: "No embedded lyrics were found in this MIDI/KAR file. You can still add or correct lyrics here.", 
                 24f, true, if (savedLyrics.isNullOrBlank()) muted else white).apply {
@@ -1280,10 +1282,15 @@ class MainActivity : Activity() {
                 setShadowLayer(4f, 1f, 2f, Color.BLACK)
                 setLineSpacing(dp(5).toFloat(), 1.05f)
             }
+            lyricsPlaybackView = lyricsView
             overlay.addView(lyricsView, lp(-1, -2, 12))
             overlay.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 44, 12))
             val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            controls.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, weight())
+            controls.addView(actionButton("Ⅱ PAUSE", panel) {
+                lyricHandler.removeCallbacks(lyricHighlighter)
+                try { player.pause() } catch (_: Exception) {}
+                lyricsPlaybackView?.text = activeLyrics
+            }, weight())
             controls.addView(actionButton("▶ RESTART", red) {
                 try { player.stop(); player.close() } catch (_: Exception) {}
                 midiPlayer = null
@@ -1302,8 +1309,14 @@ class MainActivity : Activity() {
             mainNavigation?.visibility = View.GONE
             content.minimumHeight = resources.displayMetrics.heightPixels
             content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+            lyricStartedAt = SystemClock.elapsedRealtime()
+            lyricHandler.removeCallbacks(lyricHighlighter)
+            if (timedLyrics.isNotEmpty()) lyricHandler.post(lyricHighlighter)
             player.play {
                 runOnUiThread {
+                    lyricHandler.removeCallbacks(lyricHighlighter)
+                    lyricsPlaybackView = null
+                    timedLyrics = emptyList()
                     headerStatus.text = "FINISHED"
                     try { player.close() } catch (_: Exception) {}
                     if (midiPlayer === player) midiPlayer = null
@@ -1367,6 +1380,31 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun renderTimedLyrics() {
+        val events = timedLyrics
+        val view = lyricsPlaybackView ?: return
+        if (events.isEmpty()) return
+        val elapsed = (SystemClock.elapsedRealtime() - lyricStartedAt).coerceAtLeast(0L)
+        val active = events.indexOfLast { it.timeMs <= elapsed }.coerceAtLeast(0)
+        val first = (active - 5).coerceAtLeast(0)
+        val last = (active + 10).coerceAtMost(events.lastIndex)
+        val rendered = android.text.SpannableStringBuilder()
+        for (i in first..last) {
+            val chunk = events[i].text
+            val begin = rendered.length
+            rendered.append(chunk)
+            if (i == active && rendered.length > begin) {
+                rendered.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(255, 224, 0)),
+                    begin, rendered.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                rendered.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                    begin, rendered.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                rendered.setSpan(android.text.style.BackgroundColorSpan(Color.argb(105, 255, 210, 0)),
+                    begin, rendered.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        view.text = rendered
+    }
+
     private fun stopPlayback() {
         activeLyrics = ""
         stopBgv()
@@ -1379,6 +1417,9 @@ class MainActivity : Activity() {
     }
 
     private fun stopMidi() {
+        lyricHandler.removeCallbacks(lyricHighlighter)
+        timedLyrics = emptyList()
+        lyricsPlaybackView = null
         val player = midiPlayer
         midiPlayer = null
         try { player?.stop() } catch (_: Exception) {}
