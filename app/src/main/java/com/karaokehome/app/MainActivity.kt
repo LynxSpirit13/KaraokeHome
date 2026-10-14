@@ -430,13 +430,67 @@ class MainActivity : Activity() {
             }
         }
         shade.addView(numberDisplay, lp(-1, -2, 0, 14))
-        shade.addView(label("ENTER TRACK NUMBER  •  OK TO PLAY  •  GREEN FOR QUEUE", 13f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
+        val phoneLayout = resources.configuration.screenWidthDp < 600
+        if (phoneLayout) {
+            val entry = EditText(this).apply {
+                hint = "Type song number"
+                setHintTextColor(muted)
+                setTextColor(white)
+                textSize = 18f
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                setSingleLine(true)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(Color.rgb(32, 28, 48))
+                setText(numberEntry)
+                setSelection(text.length)
+                addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                        numberEntry = s?.toString()?.filter { it.isDigit() }?.take(7) ?: ""
+                        updateNumberDisplay()
+                    }
+                    override fun afterTextChanged(s: android.text.Editable?) {}
+                })
+                setOnEditorActionListener { _, actionId, _ ->
+                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO ||
+                        actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                        playEnteredNumber(); true
+                    } else false
+                }
+            }
+            shade.addView(entry, lp(-1, 52, 0, 10))
+            val keypad = GridLayout(this).apply { columnCount = 3; rowCount = 4 }
+            val keys = listOf("1","2","3","4","5","6","7","8","9","⌫","0","CLEAR")
+            keys.forEach { key ->
+                val button = actionButton(key, panel) {
+                    when (key) {
+                        "⌫" -> numberEntry = numberEntry.dropLast(1)
+                        "CLEAR" -> numberEntry = ""
+                        else -> if (numberEntry.length < 7) numberEntry += key
+                    }
+                    if (entry.text.toString() != numberEntry) {
+                        entry.setText(numberEntry)
+                        entry.setSelection(entry.text.length)
+                    }
+                    updateNumberDisplay()
+                }
+                val p = GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
+                    width = 0; height = dp(46); setMargins(dp(3), dp(3), dp(3), dp(3))
+                }
+                keypad.addView(button, p)
+            }
+            shade.addView(keypad, lp(-1, -2, 0, 8))
+            shade.addView(label("Use the keypad or tap the field to open your phone keyboard.", 12f, false, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 8))
+        } else {
+            shade.addView(label("ENTER TRACK NUMBER  •  OK TO PLAY  •  GREEN FOR QUEUE", 13f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
+        }
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         buttons.addView(actionButton("⌫", panel) { if (numberEntry.isNotEmpty()) numberEntry = numberEntry.dropLast(1); updateNumberDisplay() }, weight())
         buttons.addView(actionButton("CLEAR", panel) { numberEntry = ""; updateNumberDisplay() }, weight())
         buttons.addView(actionButton("PLAY", red) { playEnteredNumber() }, weight())
         buttons.addView(actionButton("RESERVE", Color.rgb(40, 90, 150)) { reserveEnteredNumber() }, weight())
-        shade.addView(buttons, lp(-1, 50))
+        shade.addView(buttons, lp(-1, 50, 0, 6))
         shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 44, 10))
         stage.addView(shade, FrameLayout.LayoutParams(-1, -1))
         content.addView(stage, LinearLayout.LayoutParams(-1, dp(620)))
