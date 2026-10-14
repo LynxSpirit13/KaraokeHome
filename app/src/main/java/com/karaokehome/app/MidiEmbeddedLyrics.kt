@@ -99,15 +99,17 @@ internal object MidiEmbeddedLyrics {
     }
 
     private fun cleanKaraokeText(value: String): String {
-        return value
-            .replace(Regex("(?i)\\[\\\\\\\\n]"), "\\n")
+        val cleaned = value
+            // In common MIDI karaoke files, backslash marks a lyric line break and slash
+            // separates syllables. Remove the separator rather than displaying it.
             .replace("\\\\", "\\n")
-            .replace("/", " ")
+            .replace("/", "")
             .replace(Regex("[\\u0001-\\u0008\\u000B\\u000C\\u000E-\\u001F]"), "")
             .replace(Regex(" +"), " ")
             .replace(Regex(" *\\n *"), "\\n")
+            .replace(Regex("\\n{3,}"), "\\n\\n")
             .trim()
-            .takeIf { it.isNotBlank() } ?: value.trim()
+        return cleaned.takeIf { it.isNotBlank() } ?: value.trim()
     }
 
     private fun decode(bytes: ByteArray): String {
