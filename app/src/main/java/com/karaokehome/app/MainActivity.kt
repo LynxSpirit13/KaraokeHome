@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private val queue = mutableListOf<Song>()
     private var activeSong: Song? = null
     private var midiPlayer: MidiFilePlayer? = null
+    private var midiPaused = false
     private var midiUri: Uri? = null
     private var videoUri: Uri? = null
     private var filter = "ALL"
@@ -110,17 +111,24 @@ class MainActivity : Activity() {
                         }
                     }
                     "pause" -> {
-                        try { exoPlayer?.pause() } catch (_: Exception) {}
-                        try { midiPlayer?.pause() } catch (_: Exception) {}
+                        pausePlayback()
                         response = remoteStatus("Paused")
                     }
-                    "resume" -> {
-                        if (exoPlayer != null) {
-                            try { exoPlayer?.play() } catch (_: Exception) {}
-                            response = remoteStatus("Playback resumed")
-                        } else {
-                            response = remoteStatus("MIDI resume is not available from the current engine. Use PLAY NOW to restart the song.")
-                        }
+                    "resume", "play" -> {
+                        resumePlayback()
+                        response = remoteStatus("Playback resumed")
+                    }
+                    "play_pause" -> {
+                        togglePlayback()
+                        response = remoteStatus("Playback toggled")
+                    }
+                    "previous" -> {
+                        playPreviousSong()
+                        response = remoteStatus("Previous song")
+                    }
+                    "next" -> {
+                        playNextSong()
+                        response = remoteStatus("Next song")
                     }
                     "stop" -> {
                         stopPlayback()
@@ -161,9 +169,16 @@ class MainActivity : Activity() {
         }
     }
 
-    // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
+    // Android TV remotes and compatible media remotes send standard Android key codes.
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         when (keyCode) {
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            android.view.KeyEvent.KEYCODE_HEADSETHOOK -> { togglePlayback(); return true }
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> { resumePlayback(); return true }
+            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> { pausePlayback(); return true }
+            android.view.KeyEvent.KEYCODE_MEDIA_STOP -> { stopPlayback(); showLibrary(); return true }
+            android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> { playNextSong(); return true }
+            android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { playPreviousSong(); return true }
             in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
                 numberEntry = (numberEntry + digit).take(7)
@@ -1000,8 +1015,70 @@ class MainActivity : Activity() {
 
     private fun playSong(song: Song) {
         activeSong = song
+        midiPaused = false
         if (song.type == "MP4") playVideo(song)
         else playMidiSong(song)
+    }
+
+    /** Shared transport actions used by physical TV remotes and Smart Link commands. */
+    private fun pausePlayback() {
+        try { exoPlayer?.pause() } catch (_: Exception) {}
+        if (midiPlayer != null) {
+            try { midiPlayer?.pause(); midiPaused = true } catch (_: Exception) {}
+        }
+    }
+
+    private fun resumePlayback() {
+        if (exoPlayer != null) {
+            try { exoPlayer?.play() } catch (_: Exception) {}
+            return
+        }
+        val song = activeSong ?: return
+        // The current FluidSynth wrapper exposes pause but no reliable resume/seek API.
+        // Restarting the MIDI/KAR file is safer than reporting a false successful resume.
+        if (midiPlayer == null || midiPaused) {
+            midiPaused = false
+            playSong(song)
+        }
+    }
+
+    private fun togglePlayback() {
+        if (exoPlayer != null) {
+            if (exoPlayer?.isPlaying == true) pausePlayback() else resumePlayback()
+        } else if (midiPlayer != null && !midiPaused) {
+            pausePlayback()
+        } else {
+            resumePlayback()
+        }
+    }
+
+    private fun playNextSong() {
+        val next = if (queue.isNotEmpty()) {
+            queue.removeAt(0)
+        } else {
+            val currentIndex = activeSong?.let { current -> songs.indexOfFirst { sameSong(it, current) } } ?: -1
+            if (songs.isEmpty()) null else songs[(currentIndex + 1).coerceAtMost(songs.lastIndex)]
+        }
+        if (next == null) {
+            message("No songs are available. Scan your library first.")
+            return
+        }
+        updateHeader()
+        playSong(next)
+    }
+
+    private fun playPreviousSong() {
+        val currentIndex = activeSong?.let { current -> songs.indexOfFirst { sameSong(it, current) } } ?: -1
+        if (songs.isEmpty()) {
+            message("No songs are available. Scan your library first.")
+            return
+        }
+        val previous = when {
+            currentIndex > 0 -> songs[currentIndex - 1]
+            currentIndex == 0 -> songs.last()
+            else -> songs.first()
+        }
+        playSong(previous)
     }
 
     @Suppress("DEPRECATION")
@@ -1248,6 +1325,7 @@ class MainActivity : Activity() {
 
     private fun stopPlayback() {
         stopBgv()
+        midiPaused = false
         numberScreenActive = false
         safeStopVideo()
         stopMidi()
