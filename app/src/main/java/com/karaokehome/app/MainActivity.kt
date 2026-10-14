@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     private var numberEntry = ""
     private var numberDisplay: TextView? = null
     private var numberScreenActive = false
+    private var activeLyrics: String = ""
     private var bgvPlayer: ExoPlayer? = null
     private var bgvPlayerView: PlayerView? = null
     private var mainNavigation: View? = null
@@ -91,7 +92,7 @@ class MainActivity : Activity() {
                         response = JSONObject().put("ok", true).put("songs", list)
                             .put("queueCount", queue.size).put("status", headerStatus.text.toString())
                             .put("activeTitle", activeSong?.title ?: "")
-                            .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
+                            .put("lyrics", activeLyrics)
                     }
                     "reserve", "play" -> {
                         val index = request.optInt("index", -1)
@@ -155,7 +156,7 @@ class MainActivity : Activity() {
     private fun remoteStatus(message: String) = JSONObject().put("ok", true)
         .put("status", message).put("queueCount", queue.size)
         .put("activeTitle", activeSong?.title ?: "")
-        .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
+        .put("lyrics", activeLyrics)
 
     @Deprecated("Android back navigation")
     override fun onBackPressed() {
@@ -286,7 +287,7 @@ class MainActivity : Activity() {
             nav.addView(navButton("QUEUE ${queue.size}") { showQueue() }, weight())
             nav.addView(navButton("SETTINGS") { showSettings() }, weight())
         }
-        val scroll = ScrollView(this)
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(4), dp(12), dp(16)) }
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -459,6 +460,8 @@ class MainActivity : Activity() {
 
     private fun showLibrary() {
         restoreShellChrome()
+        content.minimumHeight = 0
+        content.setPadding(dp(12), dp(4), dp(12), dp(16))
         content.removeAllViews()
         val hero = card()
         hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
@@ -468,7 +471,7 @@ class MainActivity : Activity() {
         content.addView(hero, lp(-1, -2, 0, 10))
 
         val search = EditText(this).apply {
-            hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
+            hint = "Search song title, artist, or track number…"; setHintTextColor(muted); setTextColor(white); textSize = 16f
             setSingleLine(true); setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
             setText(query)
             tag = "songSearch"
@@ -478,7 +481,8 @@ class MainActivity : Activity() {
                 override fun afterTextChanged(s: android.text.Editable?) {}
             })
         }
-        content.addView(search, lp(-1, 46, 0, 8))
+        content.addView(search, lp(-1, 54, 0, 8))
+        content.addView(actionButton("123  DIGITAL SONG-NUMBER KEYPAD", Color.rgb(40, 45, 75)) { showNumberPad() }, lp(-1, 48, 0, 10))
         val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("ALL", "MP4", "MIDI", "KAR").forEach { f ->
             filters.addView(actionButton(f, if (filter == f) red else panel) { filter = f; showLibrary() }, weight().apply { rightMargin = dp(4) })
@@ -514,9 +518,9 @@ class MainActivity : Activity() {
                 setOnClickListener { activeSong = song; playSong(song) }
                 setOnLongClickListener { if (queue.none { sameSong(it, song) }) queue.add(song); updateHeader(); Toast.makeText(this@MainActivity, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show(); true }
             }
-            row.addView(label(song.number, 11f, true, bright), LinearLayout.LayoutParams(dp(60), -2))
-            row.addView(label(song.title, 13f, false, white), LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(label(song.type, 10f, true, if (song.type == "MP4") Color.rgb(80, 190, 255) else Color.rgb(80, 220, 165)), LinearLayout.LayoutParams(dp(42), -2))
+            row.addView(label(song.number, 13f, true, bright), LinearLayout.LayoutParams(dp(66), -2))
+            row.addView(label(song.title, 16f, false, white), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label(song.type, 12f, true, if (song.type == "MP4") Color.rgb(80, 190, 255) else Color.rgb(80, 220, 165)), LinearLayout.LayoutParams(dp(46), -2))
             rows.addView(row)
             rows.addView(View(this).apply { setBackgroundColor(divider) }, LinearLayout.LayoutParams(-1, dp(1)))
         }
@@ -744,7 +748,7 @@ class MainActivity : Activity() {
         if (bgvUri != null) startBgv(stage, bgvUri)
         val shade = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setPadding(dp(28), dp(24), dp(28), dp(24))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
             setBackgroundColor(Color.argb(if (bgvUri != null) 125 else 255, 4, 5, 24))
         }
         shade.addView(label("ENTER SONG", 30f, true, white).apply { gravity = Gravity.CENTER }, lp(-1, -2, 0, 14))
@@ -802,7 +806,7 @@ class MainActivity : Activity() {
                     updateNumberDisplay()
                 }
                 val p = GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
-                    width = 0; height = dp(46); setMargins(dp(3), dp(3), dp(3), dp(3))
+                    width = 0; height = dp(44); setMargins(dp(3), dp(3), dp(3), dp(3))
                 }
                 keypad.addView(button, p)
             }
@@ -819,7 +823,8 @@ class MainActivity : Activity() {
         shade.addView(buttons, lp(-1, 50, 0, 6))
         shade.addView(actionButton("BACK TO HOME", Color.rgb(35, 30, 65)) { stopBgv(); numberEntry = ""; showHome() }, lp(-1, 44, 10))
         stage.addView(shade, FrameLayout.LayoutParams(-1, -1))
-        content.addView(stage, LinearLayout.LayoutParams(-1, dp(620)))
+        content.minimumHeight = resources.displayMetrics.heightPixels
+        content.addView(stage, LinearLayout.LayoutParams(-1, -1))
     }
 
     private fun updateNumberDisplay() {
@@ -1089,6 +1094,7 @@ class MainActivity : Activity() {
         stopMidi()
         safeStopVideo()
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        content.minimumHeight = resources.displayMetrics.heightPixels
         val playerView = PlayerView(this).apply {
             useController = false
             setShutterBackgroundColor(Color.BLACK)
@@ -1228,9 +1234,13 @@ class MainActivity : Activity() {
             }
             overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
             overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
-            val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() } ?: loadSiblingLyrics(song)
+            val embeddedLyrics = MidiEmbeddedLyrics.extract(midi)
+            val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() }
+                ?: loadSiblingLyrics(song)?.takeIf { it.isNotBlank() }
+                ?: embeddedLyrics
+            activeLyrics = savedLyrics.orEmpty()
             val lyricsView = label(savedLyrics?.takeIf { it.isNotBlank() }
-                ?: "No matching lyrics file found. Add a same-name .LRC/.TXT file or use Edit Lyrics.",
+                ?: "No embedded lyrics were found in this MIDI/KAR file. You can still add or correct lyrics here.", 
                 24f, true, if (savedLyrics.isNullOrBlank()) muted else white).apply {
                 typeface = karaokeLyricsTypeface()
                 gravity = Gravity.CENTER
@@ -1257,6 +1267,7 @@ class MainActivity : Activity() {
             shellHeader?.visibility = View.GONE
             shellAccentLine?.visibility = View.GONE
             mainNavigation?.visibility = View.GONE
+            content.minimumHeight = resources.displayMetrics.heightPixels
             content.addView(stage, LinearLayout.LayoutParams(-1, -1))
             player.play {
                 runOnUiThread {
