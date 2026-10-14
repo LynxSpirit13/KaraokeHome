@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.view.Gravity
 import android.view.View
+import android.view.TextureView
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
@@ -66,7 +67,8 @@ class MainActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
     private var exoPlayer: ExoPlayer? = null
-    private var videoView: PlayerView? = null
+    private var videoTextureView: TextureView? = null
+    private var videoAspectContainer: androidx.media3.ui.AspectRatioFrameLayout? = null
     private var remoteServer: LanRemoteServer? = null
     private val bg = Color.rgb(8, 8, 12)
     private val panel = Color.rgb(19, 19, 25)
@@ -229,9 +231,9 @@ class MainActivity : Activity() {
                 chooseSoundFont()
                 return true
             }
-            android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+            android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER, android.view.KeyEvent.KEYCODE_DPAD_CENTER -> {
                 if (numberEntry.isNotEmpty()) {
-                    if (isTelevisionUi() && (exoPlayer != null || midiPlayer != null)) {
+                    if (isTelevisionUi() && (exoPlayer?.isPlaying == true || midiPlayer != null)) {
                         reserveEnteredNumber()
                         numberEntry = ""
                         headerStatus.text = "RESERVED • QUEUE " + queue.size
@@ -1177,14 +1179,17 @@ class MainActivity : Activity() {
         safeStopVideo()
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         content.minimumHeight = resources.displayMetrics.heightPixels
-        val playerView = PlayerView(this).apply {
-            useController = false
-            setShutterBackgroundColor(Color.BLACK)
+        // TextureView renders reliably inside the app's scrolling shell on phones and TV.
+        // PlayerView's default SurfaceView can be clipped/hidden when nested in a ScrollView.
+        val aspectContainer = androidx.media3.ui.AspectRatioFrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            keepScreenOn = true
+            setResizeMode(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT)
         }
-        videoView = playerView
-        root.addView(playerView, FrameLayout.LayoutParams(-1, -1))
+        val texture = TextureView(this).apply { keepScreenOn = true }
+        videoAspectContainer = aspectContainer
+        videoTextureView = texture
+        aspectContainer.addView(texture, FrameLayout.LayoutParams(-1, -1))
+        root.addView(aspectContainer, FrameLayout.LayoutParams(-1, -1))
         content.removeAllViews()
         shellHeader?.visibility = View.GONE
         shellAccentLine?.visibility = View.GONE
@@ -1199,8 +1204,13 @@ class MainActivity : Activity() {
         try {
             val player = ExoPlayer.Builder(this).build()
             exoPlayer = player
-            playerView.player = player
+            player.setVideoTextureView(texture)
             player.addListener(object : Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    val ratio = if (videoSize.height == 0) 0f else
+                        videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height.toFloat()
+                    if (ratio > 0f) aspectContainer.setAspectRatio(ratio)
+                }
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     when (playbackState) {
                         Player.STATE_BUFFERING -> headerStatus.text = "PREPARING VIDEO"
@@ -1236,8 +1246,9 @@ class MainActivity : Activity() {
         try { exoPlayer?.stop() } catch (_: Exception) {}
         try { exoPlayer?.release() } catch (_: Exception) {}
         exoPlayer = null
-        videoView?.player = null
-        videoView = null
+        try { videoTextureView?.let { exoPlayer?.clearVideoTextureView(it) } } catch (_: Exception) {}
+        videoTextureView = null
+        videoAspectContainer = null
         headerStatus.text = "READY"
     }
 
