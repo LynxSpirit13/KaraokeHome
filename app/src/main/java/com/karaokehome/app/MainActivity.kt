@@ -119,7 +119,12 @@ class MainActivity : Activity() {
                         stopPlayback()
                         response = remoteStatus("Playback stopped")
                     }
-                    "status", "queue" -> response = remoteStatus("Connected")
+                    "status" -> response = remoteStatus("Connected")
+                    "queue" -> {
+                        val list = JSONArray()
+                        queue.forEach { song -> list.put(JSONObject().put("number", song.number).put("title", song.title).put("type", song.type)) }
+                        response = remoteStatus("Queue updated").put("queue", list)
+                    }
                     else -> response = JSONObject().put("ok", false).put("error", "Unknown remote command")
                 }
             } catch (e: Exception) {
@@ -835,7 +840,14 @@ class MainActivity : Activity() {
                     when (playbackState) {
                         Player.STATE_BUFFERING -> headerStatus.text = "PREPARING VIDEO"
                         Player.STATE_READY -> headerStatus.text = if (player.playWhenReady) "KTV PLAYING" else "VIDEO READY"
-                        Player.STATE_ENDED -> headerStatus.text = "FINISHED"
+                        Player.STATE_ENDED -> {
+                            if (queue.isNotEmpty()) {
+                                val next = queue.removeAt(0)
+                                updateHeader()
+                                activeSong = next
+                                playSong(next)
+                            } else headerStatus.text = "FINISHED"
+                        }
                     }
                 }
                 override fun onPlayerError(error: PlaybackException) {
@@ -971,6 +983,12 @@ class MainActivity : Activity() {
                     try { player.close() } catch (_: Exception) {}
                     if (midiPlayer === player) midiPlayer = null
                     stopBgv()
+                    if (queue.isNotEmpty()) {
+                        val next = queue.removeAt(0)
+                        updateHeader()
+                        activeSong = next
+                        playSong(next)
+                    }
                 }
             }
             headerStatus.text = if (bgvUri != null) "PLAYING MIDI • BGV" else "PLAYING MIDI"
