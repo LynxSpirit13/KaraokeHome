@@ -1245,6 +1245,8 @@ class MainActivity : Activity() {
                 24f, true, if (savedLyrics.isNullOrBlank()) muted else white).apply {
                 typeface = karaokeLyricsTypeface()
                 gravity = Gravity.CENTER
+                maxLines = 4
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 setShadowLayer(4f, 1f, 2f, Color.BLACK)
                 setLineSpacing(dp(5).toFloat(), 1.05f)
             }
