@@ -2,7 +2,7 @@ name: Build KaraokeHome Android
 
 on:
   push:
-    branches: [ "main", "fix/**" ]
+    branches: [ "main", "fix/**", "feature/integrated-phone-tv-build" ]
   pull_request:
     branches: [ "main", "feature/integrated-phone-tv-build" ]
   workflow_dispatch:
