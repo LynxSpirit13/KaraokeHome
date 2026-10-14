@@ -7,8 +7,6 @@ concurrency:
 on:
   push:
     branches: [ "main", "fix/**", "feature/integrated-phone-tv-build", "feature/separate-smart-link-app" ]
-  pull_request:
-    branches: [ "main", "feature/integrated-phone-tv-build", "feature/separate-smart-link-app" ]
   workflow_dispatch:
 
 permissions:
