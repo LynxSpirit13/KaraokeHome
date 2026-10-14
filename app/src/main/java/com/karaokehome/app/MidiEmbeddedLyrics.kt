@@ -7,40 +7,35 @@ import java.nio.charset.StandardCharsets
 /**
  * Reads lyric/text meta events directly from a Standard MIDI File.
  * Karaoke files commonly store syllables in FF 05 lyric events; some use FF 01 text events.
- * This is a display fallback, independent of the synthesizer's audio playback API.
  */
 internal object MidiEmbeddedLyrics {
-    fun extract(file: File): String? {
-        return try {
-            val bytes = file.readBytes()
-            if (bytes.size < 14 || ascii(bytes, 0, 4) != "MThd") return null
-            val headerLength = readInt(bytes, 4).coerceAtLeast(6)
-            var offset = 8 + headerLength
-            val lyricEvents = mutableListOf<Pair<Long, String>>()
-            val textEvents = mutableListOf<Pair<Long, String>>()
-            while (offset + 8 <= bytes.size) {
-                val chunk = ascii(bytes, offset, 4)
-                val length = readInt(bytes, offset + 4)
-                if (length < 0 || offset + 8L + length > bytes.size) break
-                if (chunk == "MTrk") {
-                    parseTrack(bytes, offset + 8, offset + 8 + length, lyricEvents, textEvents)
-                }
-                offset += 8 + length
-            }
-            val chosen = if (lyricEvents.isNotEmpty()) lyricEvents else textEvents
-            val rendered = chosen.sortedBy { it.first }.joinToString("") { it.second }
-                .replace("\u0000", "")
-                .replace("\\r\\n", "\\n")
-                .replace("\\r", "\\n")
-                .replace(Regex("[\\t ]+"), " ")
-                .replace(Regex(" *\\n *"), "\\n")
-                .replace(Regex("\\n{3,}"), "\\n\\n")
-                .trim()
-                .takeIf { it.isNotBlank() }
-            rendered?.let { cleanKaraokeText(it) }
-        } catch (_: Exception) {
-            null
+    fun extract(file: File): String? = try {
+        val bytes = file.readBytes()
+        if (bytes.size < 14 || ascii(bytes, 0, 4) != "MThd") return null
+        val headerLength = readInt(bytes, 4).coerceAtLeast(6)
+        var offset = 8 + headerLength
+        val lyricEvents = mutableListOf<Pair<Long, String>>()
+        val textEvents = mutableListOf<Pair<Long, String>>()
+        while (offset + 8 <= bytes.size) {
+            val chunk = ascii(bytes, offset, 4)
+            val length = readInt(bytes, offset + 4)
+            if (length < 0 || offset + 8L + length > bytes.size) break
+            if (chunk == "MTrk") parseTrack(bytes, offset + 8, offset + 8 + length, lyricEvents, textEvents)
+            offset += 8 + length
         }
+        val chosen = if (lyricEvents.isNotEmpty()) lyricEvents else textEvents
+        val rendered = chosen.sortedBy { it.first }.joinToString("") { it.second }
+            .replace("\u0000", "")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace(Regex("[\t ]+"), " ")
+            .replace(Regex(" *\n *"), "\n")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+            .takeIf { it.isNotBlank() }
+        rendered?.let { cleanKaraokeText(it) }
+    } catch (_: Exception) {
+        null
     }
 
     private fun parseTrack(
@@ -74,11 +69,9 @@ internal object MidiEmbeddedLyrics {
                     p = size.second
                     val count = size.first.coerceAtMost((end - p).coerceAtLeast(0))
                     if (type == 0x05 || type == 0x01) {
-                        val raw = bytes.copyOfRange(p, p + count)
-                        val value = decode(raw).trim()
+                        val value = decode(bytes.copyOfRange(p, p + count)).trim()
                         if (value.isNotEmpty() && !value.startsWith("@")) {
-                            val target = if (type == 0x05) lyrics else texts
-                            target.add(tick to value)
+                            (if (type == 0x05) lyrics else texts).add(tick to value)
                         }
                     }
                     p += count
@@ -90,7 +83,7 @@ internal object MidiEmbeddedLyrics {
                 status < 0xf0 -> {
                     val kind = status and 0xf0
                     val dataBytes = if (kind == 0xc0 || kind == 0xd0) 1 else 2
-                    if ((bytes.getOrNull(p)?.toInt()?.and(0xff) ?: 0) >= 0x80 && p < end) break
+                    if (p < end && (bytes[p].toInt() and 0xff) >= 0x80) break
                     p = (p + dataBytes).coerceAtMost(end)
                 }
                 else -> break
@@ -99,23 +92,21 @@ internal object MidiEmbeddedLyrics {
     }
 
     private fun cleanKaraokeText(value: String): String {
+        // Backslash marks a line break in common karaoke MIDI files; slash separates syllables.
         val cleaned = value
-            // In common MIDI karaoke files, backslash marks a lyric line break and slash
-            // separates syllables. Remove the separator rather than displaying it.
-            .replace("\\\\", "\\n")
+            .replace("\\", "\n")
             .replace("/", "")
-            .replace(Regex("[\\u0001-\\u0008\\u000B\\u000C\\u000E-\\u001F]"), "")
+            .replace(Regex("[\u0001-\u0008\u000B\u000C\u000E-\u001F]"), "")
             .replace(Regex(" +"), " ")
-            .replace(Regex(" *\\n *"), "\\n")
-            .replace(Regex("\\n{3,}"), "\\n\\n")
+            .replace(Regex(" *\n *"), "\n")
+            .replace(Regex("\n{3,}"), "\n\n")
             .trim()
         return cleaned.takeIf { it.isNotBlank() } ?: value.trim()
     }
 
     private fun decode(bytes: ByteArray): String {
         val utf8 = String(bytes, StandardCharsets.UTF_8)
-        if (!utf8.contains('\\uFFFD')) return utf8
-        return String(bytes, Charset.forName("windows-1252"))
+        return if (!utf8.contains('\uFFFD')) utf8 else String(bytes, Charset.forName("windows-1252"))
     }
 
     private fun readVlq(bytes: ByteArray, start: Int, end: Int): Pair<Int, Int>? {
