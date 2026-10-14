@@ -9,7 +9,8 @@ import java.nio.charset.StandardCharsets
  * Karaoke files commonly store syllables in FF 05 lyric events; some use FF 01 text events.
  */
 internal object MidiEmbeddedLyrics {
-    fun extract(file: File): String? = try {
+    fun extract(file: File): String? {
+        return try {
         val bytes = file.readBytes()
         if (bytes.size < 14 || ascii(bytes, 0, 4) != "MThd") return null
         val headerLength = readInt(bytes, 4).coerceAtLeast(6)
@@ -34,8 +35,9 @@ internal object MidiEmbeddedLyrics {
             .trim()
             .takeIf { it.isNotBlank() }
         rendered?.let { cleanKaraokeText(it) }
-    } catch (_: Exception) {
-        null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun parseTrack(
