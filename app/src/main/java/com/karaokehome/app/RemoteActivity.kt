@@ -82,6 +82,7 @@ class RemoteActivity : Activity() {
         controls.addView(button("▶ RESUME", panel) { command("resume") }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(4) })
         controls.addView(button("■ STOP", panel) { command("stop") }, LinearLayout.LayoutParams(0, dp(44), 1f))
         root.addView(controls)
+        root.addView(button("VIEW RESERVED QUEUE", panel) { command("queue") }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
         queueText = TextView(this).apply { text = "Queue: not connected"; textSize = 14f; setTextColor(white); setPadding(0, dp(12), 0, dp(6)) }
         root.addView(queueText)
         lyrics = TextView(this).apply { text = "Lyrics will appear here when available."; textSize = 16f; setTextColor(white); setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(panel) }
@@ -151,6 +152,14 @@ class RemoteActivity : Activity() {
                     status.text = response.optString("status", "Command sent")
                     queueText.text = "Queue: ${response.optInt("queueCount")} reserved song(s)"
                     response.optString("lyrics").takeIf { it.isNotBlank() }?.let { lyrics.text = it }
+                    response.optJSONArray("queue")?.let { list ->
+                        val lines = (0 until list.length()).mapNotNull { i ->
+                            list.optJSONObject(i)?.let { "${it.optString("number")}  ·  ${it.optString("title")}  (${it.optString("type")})" }
+                        }
+                        android.app.AlertDialog.Builder(this).setTitle("Reserved songs")
+                            .setMessage(if (lines.isEmpty()) "The queue is empty." else lines.joinToString("\n"))
+                            .setPositiveButton("OK", null).show()
+                    }
                 }
             }
         }
