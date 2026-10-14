@@ -900,14 +900,14 @@ class MainActivity : Activity() {
         prefs.edit().putInt(key, next).apply()
         message(name.uppercase() + ": " + (if (next > 0) "+" else "") + next +
             (if (name == "tempo") "%" else " semitones") +
-            ". Saved setting; live adjustment requires synthesizer support.")
+            ". This setting applies to the next MIDI/KAR song you play.")
     }
 
     private fun toggleMelody() {
         val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
         val enabled = !prefs.getBoolean("karaoke_melody_enabled", true)
         prefs.edit().putBoolean("karaoke_melody_enabled", enabled).apply()
-        message(if (enabled) "Melody guide preference enabled." else "Melody guide preference disabled.")
+        message(if (enabled) "Melody guide track enabled for the next MIDI/KAR song." else "Melody guide track muted for the next MIDI/KAR song.")
     }
 
     private fun updateNumberDisplay() {
@@ -1311,8 +1311,16 @@ class MainActivity : Activity() {
                     if (!bundled.exists() || bundled.length() == 0L) assets.open("reyna-se.sf2").use { input -> bundled.outputStream().use { output -> input.copyTo(output) } }
                 }
             val safeName = song.number.ifBlank { song.title.hashCode().toString() }.replace(Regex("[^A-Za-z0-9_-]"), "_")
-            val midi = File(cacheDir, "song-$safeName.mid")
-            materializeMidi(song, midi)
+            val sourceMidi = File(cacheDir, "song-$safeName-source.mid")
+            val midi = File(cacheDir, "song-$safeName-play.mid")
+            materializeMidi(song, sourceMidi)
+            MidiTransform.apply(
+                sourceMidi,
+                midi,
+                prefs.getInt("karaoke_key", 0),
+                prefs.getInt("karaoke_tempo", 0),
+                !prefs.getBoolean("karaoke_melody_enabled", true)
+            )
             val player = MidiFilePlayer(sf.absolutePath, midi.absolutePath)
             midiPlayer = player
 
