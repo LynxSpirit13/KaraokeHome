@@ -467,8 +467,10 @@ class MainActivity : Activity() {
             val c = card()
             c.addView(label("NOW PLAYING  •  ${song.type}", 11f, true, bright))
             c.addView(label(song.title, 20f, true, white), lp(-1, -2, 8))
-            c.addView(label("MIDI instrument playback via bundled SoundFont. Embedded KAR lyrics are not displayed yet.", 13f, false, muted), lp(-1, -2, 8))
-            c.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, lp(-1, 46, 12))
+            val savedLyrics = getCorrectedLyrics(song)
+            c.addView(label(savedLyrics?.takeIf { it.isNotBlank() } ?: "MIDI instrument playback via bundled SoundFont. Embedded KAR lyric extraction is not available yet; you can save corrected lyrics for this song below.", 13f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 8))
+            c.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 46, 10))
+            c.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, lp(-1, 46, 8))
             c.addView(actionButton("▶ RESTART / PLAY", red) {
                 try { player.stop(); player.close() } catch (_: Exception) {}
                 midiPlayer = null; playMidiSong(song)
@@ -482,6 +484,50 @@ class MainActivity : Activity() {
             player.play { runOnUiThread { headerStatus.text = "FINISHED"; try { player.close() } catch (_: Exception) {}; if (midiPlayer === player) midiPlayer = null } }
             headerStatus.text = "PLAYING MIDI"
         } catch (e: Exception) { message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}") }
+    }
+
+    // Corrected lyrics are stored separately from the original MIDI/KAR file so the source is never overwritten.
+    private fun lyricsPreferenceKey(song: Song): String = "lyrics_override:" + song.uri.toString()
+
+    private fun getCorrectedLyrics(song: Song): String? =
+        getSharedPreferences("karaokehome_lyrics", MODE_PRIVATE).getString(lyricsPreferenceKey(song), null)
+
+    private fun showLyricsEditor(song: Song) {
+        val editor = EditText(this).apply {
+            setText(getCorrectedLyrics(song) ?: "")
+            hint = "Paste or type corrected lyrics here…"
+            setTextColor(white)
+            setHintTextColor(muted)
+            textSize = 16f
+            gravity = Gravity.TOP or Gravity.START
+            minLines = 8
+            maxLines = 18
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setBackgroundColor(panel)
+        }
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), 0)
+            addView(label("These corrections are saved separately; the original MIDI/KAR file is not changed.", 12f, false, muted), lp(-1, -2, 0, 8))
+            addView(editor, lp(-1, -2))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Edit lyrics · ${song.title}")
+            .setView(wrapper)
+            .setPositiveButton("SAVE") { _, _ ->
+                val text = editor.text?.toString()?.trim().orEmpty()
+                getSharedPreferences("karaokehome_lyrics", MODE_PRIVATE).edit()
+                    .putString(lyricsPreferenceKey(song), text).apply()
+                Toast.makeText(this, if (text.isEmpty()) "Lyrics cleared" else "Corrected lyrics saved", Toast.LENGTH_SHORT).show()
+                playMidiSong(song)
+            }
+            .setNeutralButton("CLEAR") { _, _ ->
+                getSharedPreferences("karaokehome_lyrics", MODE_PRIVATE).edit().remove(lyricsPreferenceKey(song)).apply()
+                Toast.makeText(this, "Saved correction removed", Toast.LENGTH_SHORT).show()
+                playMidiSong(song)
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
     }
 
     private fun stopPlayback() {
