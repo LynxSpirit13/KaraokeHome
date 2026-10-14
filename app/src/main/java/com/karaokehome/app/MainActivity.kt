@@ -218,8 +218,45 @@ class MainActivity : Activity() {
     }
 
     private fun showLibrary() {
-        numberScreenActive = false
-        content.setPadding(dp(12), dp(4), dp(12), dp(16))
+        content.removeAllViews()
+        val hero = card()
+        hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
+        hero.addView(label("Pick a song. Grab the mic. Sing together.", 18f, true, white), lp(-1, -2, 8))
+        hero.addView(label("One library for your video and classic karaoke files.", 12f, false, muted), lp(-1, -2, 5))
+        hero.addView(actionButton("＋  SCAN LIBRARY FOLDER", red) { chooseFolder() }, lp(-1, 46, 12))
+        content.addView(hero, lp(-1, -2, 0, 10))
+
+        val search = EditText(this).apply {
+            hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
+            setSingleLine(true); setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
+            setText(query)
+            tag = "songSearch"
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString() ?: ""; renderSongRows() }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            })
+        }
+        content.addView(search, lp(-1, 46, 0, 8))
+        val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("ALL", "MP4", "MIDI", "KAR").forEach { f ->
+            filters.addView(actionButton(f, if (filter == f) red else panel) { filter = f; showLibrary() }, weight().apply { rightMargin = dp(4) })
+        }
+        content.addView(filters, lp(-1, 38, 0, 8))
+        val listCard = card()
+        val columns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(Color.rgb(34, 11, 16)) }
+        columns.addView(label("TRACK", 10f, true, muted), LinearLayout.LayoutParams(dp(60), -2))
+        columns.addView(label("SONG TITLE", 10f, true, muted), LinearLayout.LayoutParams(0, -2, 1f))
+        columns.addView(label("TYPE", 10f, true, muted), LinearLayout.LayoutParams(dp(42), -2))
+        listCard.addView(columns)
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        rows.tag = "songRows"
+        listCard.addView(rows)
+        content.addView(listCard)
+        content.addView(label("Tap a song to play • Long-press to reserve", 11f, false, muted), lp(-1, -2, 8))
+        renderSongRows()
+    }
+
     private fun renderSongRows() {
         val rows = content.findViewWithTag<LinearLayout>("songRows") ?: return
         rows.removeAllViews()
