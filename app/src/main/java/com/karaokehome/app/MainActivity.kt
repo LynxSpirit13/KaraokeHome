@@ -21,6 +21,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.io.File
 import java.util.zip.ZipInputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -371,8 +373,17 @@ class MainActivity : Activity() {
                     android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                     intArrayOf(color, blend(color, Color.WHITE, 0.20f))
                 ).apply { cornerRadius = dp(22).toFloat(); setStroke(dp(2), Color.argb(180, 235, 190, 225)) }
-                isFocusable = true; isClickable = true; setOnClickListener { action() }
-                addView(TextView(this@MainActivity).apply { text = symbol; textSize = 42f; setTextColor(white); gravity = Gravity.CENTER })
+                isFocusable = true; isClickable = true
+                setOnClickListener { action() }
+                setOnFocusChangeListener { view, focused ->
+                    (view.background as? android.graphics.drawable.GradientDrawable)?.setStroke(
+                        dp(if (focused) 4 else 2),
+                        if (focused) Color.WHITE else Color.argb(180, 235, 190, 225)
+                    )
+                    view.scaleX = if (focused) 1.025f else 1f
+                    view.scaleY = if (focused) 1.025f else 1f
+                }
+                addView(TextView(this@MainActivity).apply { text = symbol; textSize = 42f; setTextColor(white); gravity = Gravity.CENTER; isFocusable = false })
                 addView(TextView(this@MainActivity).apply { text = title; textSize = 18f; setTextColor(white); gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) })
             }
             val params = GridLayout.LayoutParams(GridLayout.spec(row, 1f), GridLayout.spec(col, span, 1f)).apply {
@@ -393,11 +404,14 @@ class MainActivity : Activity() {
         }, lp(-1, -2))
         content.addView(grid, lp(-1, -2))
         val footer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        footer.addView(actionButton("⚙ SETTINGS", panel) { showSettings() }, weight())
+        footer.addView(actionButton("SCAN LIBRARY", red) { scanLibraryOrChooseFolder() }, weight())
         footer.addView(actionButton("SONG LIBRARY", panel) { showLibrary() }, weight())
-        footer.addView(actionButton("RESERVED SONGS", panel) { showQueue() }, weight())
-        content.addView(footer, lp(-1, 48, 8))
+        footer.addView(actionButton("QUEUE", panel) { showQueue() }, weight())
+        footer.addView(actionButton("SETTINGS / IP", panel) { showSettings() }, weight())
+        content.addView(footer, lp(-1, 52, 8))
+        content.addView(connectionInfoCard(), lp(-1, -2, 8))
         content.setPadding(dp(12), dp(8), dp(12), dp(12))
+        content.post { content.getChildAt(1)?.requestFocus() }
     }
 
     private fun blend(a: Int, b: Int, fraction: Float): Int {
@@ -423,7 +437,7 @@ class MainActivity : Activity() {
         hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
         hero.addView(label("Pick a song. Grab the mic. Sing together.", 18f, true, white), lp(-1, -2, 8))
         hero.addView(label("One library for your video and classic karaoke files.", 12f, false, muted), lp(-1, -2, 5))
-        hero.addView(actionButton("＋  SCAN LIBRARY FOLDER", red) { chooseFolder() }, lp(-1, 46, 12))
+        hero.addView(actionButton("＋  SCAN / RESCAN LIBRARY FOLDER", red) { scanLibraryOrChooseFolder() }.apply { tag = "scanLibraryButton" }, lp(-1, 50, 12))
         content.addView(hero, lp(-1, -2, 0, 10))
 
         val search = EditText(this).apply {
@@ -455,6 +469,7 @@ class MainActivity : Activity() {
         content.addView(listCard)
         content.addView(label("Tap a song to play • Long-press to reserve", 11f, false, muted), lp(-1, -2, 8))
         renderSongRows()
+        content.post { content.findViewWithTag<View>("scanLibraryButton")?.requestFocus() }
     }
 
     private fun renderSongRows() {
@@ -466,6 +481,9 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(11), dp(8), dp(11)); setBackgroundColor(if (i % 2 == 0) panel else Color.rgb(14, 14, 19))
                 isFocusable = true; isClickable = true
+                setOnFocusChangeListener { view, focused ->
+                    view.setBackgroundColor(if (focused) Color.rgb(75, 25, 38) else if (i % 2 == 0) panel else Color.rgb(14, 14, 19))
+                }
                 setOnClickListener { activeSong = song; playSong(song) }
                 setOnLongClickListener { if (queue.none { sameSong(it, song) }) queue.add(song); updateHeader(); Toast.makeText(this@MainActivity, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show(); true }
             }
@@ -876,6 +894,13 @@ class MainActivity : Activity() {
         c.addView(actionButton("USE EXISTING SONGHUB FOLDER", red) { chooseHomeFolderLocation() }, lp(-1, 46, 10))
         c.addView(actionButton("CHOOSE / RESCAN SONGS FOLDER", panel) { chooseFolder() }, lp(-1, 46, 8))
         c.addView(label("Shared library: existing SongHub folder • no duplicate media storage", 12f, false, muted), lp(-1, -2, 8))
+        c.addView(actionButton("RESCAN CURRENT FOLDER", red) { rescanCurrentFolder() }, lp(-1, 46, 8))
+        c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
+        c.addView(label("PHONE REMOTE CONNECTION", 11f, true, bright))
+        c.addView(label("Connect your phone's KaraokeHome Smart Link to the same Wi-Fi network. Enter one of these TV IP addresses and use port 43821 if automatic discovery does not work.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(label("TV IP ADDRESS: " + (localIpv4Addresses().ifEmpty { listOf("Not available — connect TV to Wi-Fi/Ethernet") }.joinToString("   •   ")), 17f, true, white), lp(-1, -2, 8))
+        c.addView(label("Remote service: TCP 43821  •  Discovery: UDP 43822", 12f, true, bright), lp(-1, -2, 4))
+        c.addView(actionButton("REFRESH IP ADDRESS", panel) { showSettings() }, lp(-1, 42, 8))
         c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
         c.addView(label("PLAYBACK", 11f, true, bright))
         c.addView(label("MP4 video uses the device video decoder. MIDI/KAR uses the bundled SoundFont. For external lyrics, place a same-name .LRC or .TXT file beside the MIDI/KAR file. Timed lyric rendering and phone-to-TV pairing still need further work.", 13f, false, muted), lp(-1, -2, 6))
@@ -883,6 +908,71 @@ class MainActivity : Activity() {
         c.addView(actionButton("PICK MIDI / KAR FILE", panel) { chooseMidiFile() }, lp(-1, 44, 8))
         c.addView(actionButton("STOP PLAYBACK", panel) { stopPlayback() }, lp(-1, 44, 8))
         content.addView(c)
+        content.post { c.getChildAt(2)?.requestFocus() }
+    }
+
+    private fun scanLibraryOrChooseFolder() {
+        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("home_tree_uri", null)
+        if (saved.isNullOrBlank()) chooseFolder() else rescanCurrentFolder()
+    }
+
+    private fun rescanCurrentFolder() {
+        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("home_tree_uri", null)
+        if (saved.isNullOrBlank()) {
+            message("No library folder selected yet. Choose SCAN LIBRARY FOLDER first.")
+            chooseFolder()
+            return
+        }
+        val tree = Uri.parse(saved)
+        val permissionHeld = contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
+        if (!permissionHeld) {
+            message("Android no longer grants access to the saved folder. Choose the library folder again.")
+            chooseFolder()
+            return
+        }
+        val oldSongs = songs.toList()
+        songs.clear()
+        try {
+            scanTree(tree, DocumentsContract.getTreeDocumentId(tree), 0)
+            assignTrackNumbers()
+            saveCatalog()
+            query = ""
+            showLibrary()
+            Toast.makeText(this, "Rescanned ${songs.size} karaoke files", Toast.LENGTH_LONG).show()
+            if (songs.isEmpty()) message("No MP4, MIDI, or KAR files found. Select the folder that contains your songs.")
+        } catch (e: Exception) {
+            songs.clear()
+            songs.addAll(oldSongs)
+            message("Rescan failed: ${e.message ?: "could not read folder"}")
+        }
+    }
+
+    private fun localIpv4Addresses(): List<String> {
+        return try {
+            val addresses = mutableListOf<String>()
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
+            while (interfaces.hasMoreElements()) {
+                val network = interfaces.nextElement()
+                if (!network.isUp || network.isLoopback) continue
+                val ips = network.inetAddresses
+                while (ips.hasMoreElements()) {
+                    val address = ips.nextElement()
+                    if (address is Inet4Address && !address.isLoopbackAddress && address.isSiteLocalAddress) {
+                        addresses.add(address.hostAddress ?: continue)
+                    }
+                }
+            }
+            addresses.distinct().sorted()
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun connectionInfoCard(): View {
+        val c = card()
+        c.addView(label("SMART LINK CONNECTION", 11f, true, bright))
+        c.addView(label("TV IP: " + (localIpv4Addresses().firstOrNull() ?: "Connect TV to Wi-Fi or Ethernet"), 18f, true, white), lp(-1, -2, 5))
+        c.addView(label("Port 43821  •  Phone and TV must use the same local network", 12f, false, muted), lp(-1, -2, 3))
+        c.addView(actionButton("NETWORK / LIBRARY SETTINGS", panel) { showSettings() }, lp(-1, 42, 8))
+        return c
     }
 
     private fun chooseVideoFile() {
@@ -1186,7 +1276,14 @@ class MainActivity : Activity() {
     }
     private fun actionButton(value: String, color: Int, action: () -> Unit) = Button(this).apply {
         text = value; textSize = 12f; isAllCaps = false; setTextColor(white); setBackgroundColor(color)
-        isFocusable = true; setOnClickListener { action() }
+        isFocusable = true; isClickable = true
+        setPadding(dp(8), dp(4), dp(8), dp(4))
+        setOnFocusChangeListener { view, focused ->
+            view.setBackgroundColor(if (focused) Color.rgb(235, 45, 70) else color)
+            view.scaleX = if (focused) 1.035f else 1f
+            view.scaleY = if (focused) 1.035f else 1f
+        }
+        setOnClickListener { action() }
     }
     private fun navButton(value: String, action: () -> Unit) = actionButton(value, Color.rgb(35, 13, 19), action)
     private fun lp(w: Int, h: Int, top: Int = 0, bottom: Int = 0) = LinearLayout.LayoutParams(w, h).apply { topMargin = dp(top); bottomMargin = dp(bottom) }
