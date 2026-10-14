@@ -30,6 +30,7 @@ class MainActivity : Activity() {
     private var numberDisplay: TextView? = null
     private var numberScreenActive = false
     private var bgvView: VideoView? = null
+    private var mainNavigation: View? = null
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
     private lateinit var video: VideoView
@@ -146,6 +147,7 @@ class MainActivity : Activity() {
         root.addView(header)
         root.addView(View(this).apply { setBackgroundColor(red) }, LinearLayout.LayoutParams(-1, dp(2)))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        mainNavigation = nav
         nav.addView(navButton("SONGS") { showLibrary() }, weight())
         nav.addView(navButton("TRACK #") { showNumberPad() }, weight())
         nav.addView(navButton("QUEUE ${queue.size}") { showQueue() }, weight())
@@ -171,6 +173,7 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         numberScreenActive = false
+        mainNavigation?.visibility = View.VISIBLE
         content.removeAllViews()
         content.setPadding(dp(24), dp(18), dp(24), dp(20))
         val grid = GridLayout(this).apply { columnCount = 3; rowCount = 3; useDefaultMargins = true }
@@ -221,6 +224,7 @@ class MainActivity : Activity() {
 
     private fun showRankings() {
         numberScreenActive = false
+        mainNavigation?.visibility = View.VISIBLE
         content.removeAllViews()
         content.addView(label("RANKINGS", 24f, true, white), lp(-1, -2, 8, 12))
         content.addView(label("Ranking statistics are not available yet. Start with the song library and reservation queue.", 16f, false, muted), lp(-1, -2, 0, 12))
@@ -228,6 +232,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLibrary() {
+        mainNavigation?.visibility = View.VISIBLE
         content.removeAllViews()
         val hero = card()
         hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
@@ -404,6 +409,7 @@ class MainActivity : Activity() {
 
     private fun showNumberPad() {
         numberScreenActive = true
+        mainNavigation?.visibility = View.GONE
         content.removeAllViews()
         content.setPadding(0, 0, 0, 0)
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
@@ -526,6 +532,7 @@ class MainActivity : Activity() {
 
     private fun showQueue() {
         numberScreenActive = false
+        mainNavigation?.visibility = View.VISIBLE
         stopBgv()
         content.removeAllViews()
         content.addView(label("SONG RESERVATION QUEUE", 17f, true, white), lp(-1, -2, 4, 10))
@@ -551,6 +558,7 @@ class MainActivity : Activity() {
 
     private fun showSettings() {
         numberScreenActive = false
+        mainNavigation?.visibility = View.VISIBLE
         stopBgv()
         content.removeAllViews()
         content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
