@@ -114,11 +114,17 @@ class MainActivity : Activity() {
                         response = remoteStatus("Paused")
                     }
                     "resume" -> {
-                        try { exoPlayer?.play() } catch (_: Exception) {}
-                        response = remoteStatus("Resume requested")
+                        if (exoPlayer != null) {
+                            try { exoPlayer?.play() } catch (_: Exception) {}
+                            response = remoteStatus("Playback resumed")
+                        } else {
+                            response = remoteStatus("MIDI resume is not available from the current engine. Use PLAY NOW to restart the song.")
+                        }
                     }
                     "stop" -> {
                         stopPlayback()
+                        activeSong = null
+                        showLibrary()
                         response = remoteStatus("Playback stopped")
                     }
                     "status" -> response = remoteStatus("Connected")
@@ -1065,6 +1071,7 @@ class MainActivity : Activity() {
         numberScreenActive = false
         safeStopVideo()
         stopMidi()
+        activeSong = null
         headerStatus.text = "READY"
     }
 
