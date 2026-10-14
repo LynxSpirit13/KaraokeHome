@@ -61,15 +61,14 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val deviceMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
-        if (deviceMode != Configuration.UI_MODE_TYPE_TELEVISION) {
-            startActivity(Intent(this, RemoteActivity::class.java))
-            finish()
-            return
-        }
+        val isTelevision = deviceMode == Configuration.UI_MODE_TYPE_TELEVISION
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
         loadSavedLibrary()
-        remoteServer = LanRemoteServer(::handleRemoteRequest).also { it.start() }
+        // The player remains a player on phones too. Smart Link is a separate installable app.
+        if (isTelevision) {
+            remoteServer = LanRemoteServer(::handleRemoteRequest).also { it.start() }
+        }
         showHome()
     }
 
