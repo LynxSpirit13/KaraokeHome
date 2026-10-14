@@ -411,7 +411,7 @@ class MainActivity : Activity() {
         content.addView(footer, lp(-1, 52, 8))
         content.addView(connectionInfoCard(), lp(-1, -2, 8))
         content.setPadding(dp(12), dp(8), dp(12), dp(12))
-        content.post { content.getChildAt(1)?.requestFocus() }
+        content.post { grid.getChildAt(0)?.requestFocus() }
     }
 
     private fun blend(a: Int, b: Int, fraction: Float): Int {
