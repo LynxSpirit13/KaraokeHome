@@ -261,11 +261,16 @@ class MainActivity : Activity() {
         root.addView(shellAccentLine, LinearLayout.LayoutParams(-1, dp(2)))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         mainNavigation = nav
-        nav.addView(navButton("SONGS") { showLibrary() }, weight())
-        nav.addView(navButton("TRACK #") { showNumberPad() }, weight())
-        nav.addView(navButton("QUEUE ${queue.size}") { showQueue() }, weight())
-        nav.addView(navButton("SETTINGS") { showSettings() }, weight())
-        root.addView(nav)
+        val isTelevision = (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+        if (isTelevision) {
+            nav.addView(navButton("KARAOKE") { showHome() }, weight())
+            nav.addView(navButton("SETTINGS") { showSettings() }, weight())
+        } else {
+            nav.addView(navButton("SONGS") { showLibrary() }, weight())
+            nav.addView(navButton("TRACK #") { showNumberPad() }, weight())
+            nav.addView(navButton("QUEUE ${queue.size}") { showQueue() }, weight())
+            nav.addView(navButton("SETTINGS") { showSettings() }, weight())
+        }
         val scroll = ScrollView(this)
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(4), dp(12), dp(16)) }
         scroll.addView(content)
@@ -362,18 +367,39 @@ class MainActivity : Activity() {
         numberScreenActive = false
         restoreShellChrome()
         content.removeAllViews()
-        content.setPadding(dp(24), dp(18), dp(24), dp(20))
-        val grid = GridLayout(this).apply { columnCount = 3; rowCount = 3; useDefaultMargins = true }
-        fun tile(title: String, symbol: String, color: Int, row: Int, col: Int, span: Int = 1, action: () -> Unit) {
-            val b = LinearLayout(this).apply {
+        content.gravity = Gravity.CENTER
+        content.setPadding(dp(28), dp(18), dp(28), dp(22))
+
+        content.addView(TextView(this).apply {
+            text = "KaraokeHome"
+            textSize = 34f
+            setTextColor(white)
+            gravity = Gravity.CENTER
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }, lp(-1, -2, 0, 6))
+        content.addView(TextView(this).apply {
+            text = "CHOOSE WHAT YOU WANT TO DO"
+            textSize = 12f
+            setTextColor(muted)
+            gravity = Gravity.CENTER
+        }, lp(-1, -2, 0, 24))
+
+        val menu = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun menuTile(title: String, symbol: String, color: Int, action: () -> Unit): View {
+            return LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(18), dp(12), dp(18), dp(12))
+                setPadding(dp(20), dp(20), dp(20), dp(20))
                 background = android.graphics.drawable.GradientDrawable(
                     android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(color, blend(color, Color.WHITE, 0.20f))
+                    intArrayOf(color, blend(color, Color.WHITE, 0.18f))
                 ).apply { cornerRadius = dp(22).toFloat(); setStroke(dp(2), Color.argb(180, 235, 190, 225)) }
-                isFocusable = true; isClickable = true
+                isFocusable = true
+                isClickable = true
+                contentDescription = title
                 setOnClickListener { action() }
                 setOnFocusChangeListener { view, focused ->
                     (view.background as? android.graphics.drawable.GradientDrawable)?.setStroke(
@@ -383,35 +409,21 @@ class MainActivity : Activity() {
                     view.scaleX = if (focused) 1.025f else 1f
                     view.scaleY = if (focused) 1.025f else 1f
                 }
-                addView(TextView(this@MainActivity).apply { text = symbol; textSize = 42f; setTextColor(white); gravity = Gravity.CENTER; isFocusable = false })
-                addView(TextView(this@MainActivity).apply { text = title; textSize = 18f; setTextColor(white); gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD) })
-            }
-            val params = GridLayout.LayoutParams(GridLayout.spec(row, 1f), GridLayout.spec(col, span, 1f)).apply {
-                width = 0; height = dp(if (span == 2) 170 else 145); setMargins(dp(5), dp(5), dp(5), dp(5))
-            }
-            grid.addView(b, params)
+                addView(TextView(this@MainActivity).apply {
+                    text = symbol; textSize = 48f; setTextColor(white); gravity = Gravity.CENTER; isFocusable = false
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = title; textSize = 22f; setTextColor(white); gravity = Gravity.CENTER
+                    setTypeface(typeface, android.graphics.Typeface.BOLD); isFocusable = false
+                })
+            }.also { it.tag = "homeMenu:$title" }
         }
-        tile("ENTER KARAOKE", "♫", Color.rgb(155, 25, 90), 0, 0, 2) { numberEntry = ""; showNumberPad() }
-        tile("MEDIA PLAYER", "▣", Color.rgb(105, 40, 145), 0, 2) { showLibrary() }
-        tile("RANKINGS", "🏆", Color.rgb(30, 80, 155), 1, 2) { showRankings() }
-        tile("SONG SEARCH", "♫⌕", Color.rgb(160, 55, 40), 2, 0) { showLibrary() }
-        tile("ARTIST SEARCH", "♟⌕", Color.rgb(170, 120, 35), 2, 1) { showLibrary() }
-        tile("NEW SONGS", "♫", Color.rgb(25, 105, 65), 2, 2) { showLibrary() }
-        // Keep the reference's colorful tile layout while offering simple access to settings.
-        content.addView(TextView(this).apply {
-            text = "KaraokeHome"; textSize = 30f; setTextColor(white); gravity = Gravity.CENTER
-            setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, dp(4), 0, dp(10))
-        }, lp(-1, -2))
-        content.addView(grid, lp(-1, -2))
-        val footer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        footer.addView(actionButton("SCAN LIBRARY", red) { scanLibraryOrChooseFolder() }, weight())
-        footer.addView(actionButton("SONG LIBRARY", panel) { showLibrary() }, weight())
-        footer.addView(actionButton("QUEUE", panel) { showQueue() }, weight())
-        footer.addView(actionButton("SETTINGS / IP", panel) { showSettings() }, weight())
-        content.addView(footer, lp(-1, 52, 8))
-        content.addView(connectionInfoCard(), lp(-1, -2, 8))
-        content.setPadding(dp(12), dp(8), dp(12), dp(12))
-        content.post { grid.getChildAt(0)?.requestFocus() }
+        menu.addView(menuTile("KARAOKE", "♫", Color.rgb(155, 25, 90)) { showLibrary() },
+            LinearLayout.LayoutParams(0, dp(190), 1f).apply { marginEnd = dp(10) })
+        menu.addView(menuTile("SETTINGS", "⚙", Color.rgb(48, 50, 66)) { showSettings() },
+            LinearLayout.LayoutParams(0, dp(190), 1f).apply { marginStart = dp(10) })
+        content.addView(menu, LinearLayout.LayoutParams(-1, -2))
+        content.post { content.findViewWithTag<View>("homeMenu:KARAOKE")?.requestFocus() }
     }
 
     private fun blend(a: Int, b: Int, fraction: Float): Int {
