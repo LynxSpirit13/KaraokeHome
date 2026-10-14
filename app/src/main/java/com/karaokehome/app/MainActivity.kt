@@ -45,6 +45,84 @@ class MainActivity : Activity() {
         showLibrary()
     }
 
+    // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        when (keyCode) {
+            in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> {
+                val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
+                numberEntry = (numberEntry + digit).take(6)
+                showNumberPad()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_PROG_RED -> {
+                showLibrary()
+                content.post {
+                    val search = content.findViewWithTag<EditText>("songSearch")
+                    search?.requestFocus()
+                    (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                        ?.showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                }
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_PROG_GREEN -> {
+                showQueue()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_PROG_YELLOW -> {
+                showBgvOptions()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_PROG_BLUE -> {
+                chooseSoundFont()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (numberEntry.isNotEmpty()) {
+                    val song = songs.firstOrNull { it.number == numberEntry }
+                    if (song != null) { activeSong = song; playSong(song); return true }
+                }
+            }
+            android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL -> {
+                if (numberEntry.isNotEmpty()) {
+                    numberEntry = numberEntry.dropLast(1)
+                    showNumberPad()
+                    return true
+                }
+            }
+            android.view.KeyEvent.KEYCODE_ESCAPE, android.view.KeyEvent.KEYCODE_BACK -> {
+                if (numberEntry.isNotEmpty()) { numberEntry = ""; showNumberPad(); return true }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun showBgvOptions() {
+        AlertDialog.Builder(this)
+            .setTitle("Background video (BGV)")
+            .setMessage("BGV playback for MIDI/KAR is not implemented yet. You can choose a video file now, but it will not be composited behind MIDI lyrics until the BGV player is added.")
+            .setPositiveButton("CHOOSE VIDEO") { _, _ ->
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "video/*"
+                }, REQUEST_PICK_BGV)
+            }
+            .setNeutralButton("DISABLE BGV") { _, _ ->
+                getSharedPreferences("karaokehome", MODE_PRIVATE).edit().remove("bgv_uri").apply()
+                message("BGV preference cleared. MIDI/KAR background-video playback is not available in this build yet.")
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
+    private fun chooseSoundFont() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream", "audio/x-soundfont", "audio/sf2"))
+        }, REQUEST_PICK_SOUNDFONT)
+    }
+
+
     private fun buildShell() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
         val header = LinearLayout(this).apply {
@@ -89,6 +167,7 @@ class MainActivity : Activity() {
             hint = "Search songs or artists…"; setHintTextColor(muted); setTextColor(white); textSize = 14f
             setSingleLine(true); setPadding(dp(12), 0, dp(12), 0); setBackgroundColor(panel)
             setText(query)
+            tag = "songSearch"
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString() ?: ""; renderSongRows() }
@@ -215,6 +294,16 @@ class MainActivity : Activity() {
             midiUri = uri
             activeSong = Song("000000", uri.lastPathSegment?.substringAfterLast('/') ?: "MIDI", uri, "MIDI")
             playSong(activeSong!!)
+        } else if (requestCode == REQUEST_PICK_SOUNDFONT) {
+            try {
+                val target = File(filesDir, "custom-soundfont.sf2")
+                contentResolver.openInputStream(uri).use { input -> requireNotNull(input) { "SoundFont could not be read" }; target.outputStream().use { output -> input.copyTo(output) } }
+                getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("custom_soundfont_path", target.absolutePath).apply()
+                message("SoundFont selected. It will be used for the next MIDI/KAR playback.")
+            } catch (e: Exception) { message("Could not load SoundFont: ${e.message ?: "invalid file"}") }
+        } else if (requestCode == REQUEST_PICK_BGV) {
+            getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("bgv_uri", uri.toString()).apply()
+            message("BGV file saved as a preference. Actual MIDI/KAR background-video playback is not implemented yet.")
         }
     }
 
@@ -454,8 +543,12 @@ class MainActivity : Activity() {
     private fun playMidiSong(song: Song) {
         stopMidi()
         try {
-            val sf = File(filesDir, "reyna-se.sf2")
-            if (!sf.exists() || sf.length() == 0L) assets.open("reyna-se.sf2").use { input -> sf.outputStream().use { output -> input.copyTo(output) } }
+            val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
+            val customSfPath = prefs.getString("custom_soundfont_path", null)
+            val sf = customSfPath?.let { File(it) }?.takeIf { it.exists() && it.length() > 0L }
+                ?: File(filesDir, "reyna-se.sf2").also { bundled ->
+                    if (!bundled.exists() || bundled.length() == 0L) assets.open("reyna-se.sf2").use { input -> bundled.outputStream().use { output -> input.copyTo(output) } }
+                }
             val midi = File(cacheDir, "song-${song.number}.mid")
             contentResolver.openInputStream(song.uri).use { input ->
                 requireNotNull(input) { "File could not be read" }
@@ -569,5 +662,7 @@ class MainActivity : Activity() {
         private const val REQUEST_HOME_FOLDER = 204
         private const val REQUEST_PICK_VIDEO = 202
         private const val REQUEST_PICK_MIDI = 203
+        private const val REQUEST_PICK_SOUNDFONT = 205
+        private const val REQUEST_PICK_BGV = 206
     }
 }
