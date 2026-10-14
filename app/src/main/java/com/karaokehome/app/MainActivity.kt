@@ -3,6 +3,7 @@ package com.karaokehome.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.Configuration
 import android.database.Cursor
 import android.graphics.Color
 import android.net.Uri
@@ -14,10 +15,20 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
 import dev.kotlinds.fluidsynthkmp.MidiFilePlayer
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.io.File
+import java.util.zip.ZipInputStream
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 
 class MainActivity : Activity() {
-    private data class Song(val number: String, val title: String, val uri: Uri, val type: String)
+    private data class Song(val number: String, val title: String, val uri: Uri, val type: String, val zipEntry: String? = null)
     private val songs = mutableListOf<Song>()
     private val queue = mutableListOf<Song>()
     private var activeSong: Song? = null
@@ -29,11 +40,16 @@ class MainActivity : Activity() {
     private var numberEntry = ""
     private var numberDisplay: TextView? = null
     private var numberScreenActive = false
-    private var bgvView: VideoView? = null
+    private var bgvPlayer: ExoPlayer? = null
+    private var bgvPlayerView: PlayerView? = null
     private var mainNavigation: View? = null
+    private var shellHeader: View? = null
+    private var shellAccentLine: View? = null
     private lateinit var content: LinearLayout
     private lateinit var headerStatus: TextView
-    private lateinit var video: VideoView
+    private var exoPlayer: ExoPlayer? = null
+    private var videoView: PlayerView? = null
+    private var remoteServer: LanRemoteServer? = null
     private val bg = Color.rgb(8, 8, 12)
     private val panel = Color.rgb(19, 19, 25)
     private val red = Color.rgb(224, 18, 39)
@@ -44,10 +60,104 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val deviceMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+        if (deviceMode != Configuration.UI_MODE_TYPE_TELEVISION) {
+            startActivity(Intent(this, RemoteActivity::class.java))
+            finish()
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
         loadSavedLibrary()
+        remoteServer = LanRemoteServer(::handleRemoteRequest).also { it.start() }
         showHome()
+    }
+
+    /** Handle phone commands on the UI thread because the song catalog and players are UI-owned. */
+    private fun handleRemoteRequest(request: JSONObject): JSONObject {
+        var response = JSONObject().put("ok", false).put("error", "TV did not respond")
+        val latch = CountDownLatch(1)
+        runOnUiThread {
+            try {
+                when (request.optString("action")) {
+                    "library" -> {
+                        val list = JSONArray()
+                        songs.forEachIndexed { index, song ->
+                            list.put(JSONObject().put("index", index).put("number", song.number)
+                                .put("title", song.title).put("type", song.type))
+                        }
+                        response = JSONObject().put("ok", true).put("songs", list)
+                            .put("queueCount", queue.size).put("status", headerStatus.text.toString())
+                            .put("activeTitle", activeSong?.title ?: "")
+                            .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
+                    }
+                    "reserve", "play" -> {
+                        val index = request.optInt("index", -1)
+                        val song = songs.getOrNull(index)
+                        if (song == null) {
+                            response = JSONObject().put("ok", false).put("error", "Song not found. Reload the TV library.")
+                        } else {
+                            if (request.optString("action") == "reserve") {
+                                if (queue.none { sameSong(it, song) }) queue.add(song)
+                                updateHeader()
+                                response = remoteStatus("Reserved: " + song.title)
+                            } else {
+                                activeSong = song
+                                playSong(song)
+                                response = remoteStatus("Playing: " + song.title)
+                            }
+                        }
+                    }
+                    "pause" -> {
+                        try { exoPlayer?.pause() } catch (_: Exception) {}
+                        try { midiPlayer?.pause() } catch (_: Exception) {}
+                        response = remoteStatus("Paused")
+                    }
+                    "resume" -> {
+                        if (exoPlayer != null) {
+                            try { exoPlayer?.play() } catch (_: Exception) {}
+                            response = remoteStatus("Playback resumed")
+                        } else {
+                            response = remoteStatus("MIDI resume is not available from the current engine. Use PLAY NOW to restart the song.")
+                        }
+                    }
+                    "stop" -> {
+                        stopPlayback()
+                        activeSong = null
+                        showLibrary()
+                        response = remoteStatus("Playback stopped")
+                    }
+                    "status" -> response = remoteStatus("Connected")
+                    "queue" -> {
+                        val list = JSONArray()
+                        queue.forEach { song -> list.put(JSONObject().put("number", song.number).put("title", song.title).put("type", song.type)) }
+                        response = remoteStatus("Queue updated").put("queue", list)
+                    }
+                    else -> response = JSONObject().put("ok", false).put("error", "Unknown remote command")
+                }
+            } catch (e: Exception) {
+                response = JSONObject().put("ok", false).put("error", e.message ?: "Command failed")
+            } finally { latch.countDown() }
+        }
+        latch.await(4, TimeUnit.SECONDS)
+        return response
+    }
+
+    private fun remoteStatus(message: String) = JSONObject().put("ok", true)
+        .put("status", message).put("queueCount", queue.size)
+        .put("activeTitle", activeSong?.title ?: "")
+        .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
+
+    @Deprecated("Android back navigation")
+    override fun onBackPressed() {
+        if (exoPlayer != null || midiPlayer != null || bgvPlayer != null) {
+            stopPlayback()
+            showLibrary()
+        } else if (::content.isInitialized) {
+            showHome()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
@@ -104,7 +214,7 @@ class MainActivity : Activity() {
     private fun showBgvOptions() {
         AlertDialog.Builder(this)
             .setTitle("Background video (BGV)")
-            .setMessage("BGV playback for MIDI/KAR is not implemented yet. You can choose a video file now, but it will not be composited behind MIDI lyrics until the BGV player is added.")
+            .setMessage("Choose an MP4 to loop silently behind MIDI/KAR playback. BGV audio is muted so the MIDI soundtrack remains audible.")
             .setPositiveButton("CHOOSE VIDEO") { _, _ ->
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -113,7 +223,7 @@ class MainActivity : Activity() {
             }
             .setNeutralButton("DISABLE BGV") { _, _ ->
                 getSharedPreferences("karaokehome", MODE_PRIVATE).edit().remove("bgv_uri").apply()
-                message("BGV preference cleared. MIDI/KAR background-video playback is not available in this build yet.")
+                message("Background video disabled.")
             }
             .setNegativeButton("CANCEL", null)
             .show()
@@ -144,8 +254,10 @@ class MainActivity : Activity() {
         header.addView(branding, LinearLayout.LayoutParams(0, -2, 1f))
         headerStatus = label("READY", 10f, true, bright)
         header.addView(headerStatus)
+        shellHeader = header
         root.addView(header)
-        root.addView(View(this).apply { setBackgroundColor(red) }, LinearLayout.LayoutParams(-1, dp(2)))
+        shellAccentLine = View(this).apply { setBackgroundColor(red) }
+        root.addView(shellAccentLine, LinearLayout.LayoutParams(-1, dp(2)))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         mainNavigation = nav
         nav.addView(navButton("SONGS") { showLibrary() }, weight())
@@ -160,20 +272,94 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    /**
+     * Restore the last indexed catalog from app-private storage. Opening the app must not
+     * enumerate thousands of files (or reopen every ZIP) on each launch.
+     */
     private fun loadSavedLibrary() {
-        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("home_tree_uri", null) ?: return
+        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE)
+            .getString("home_tree_uri", null) ?: return
+        val tree = Uri.parse(saved)
+        val permissionHeld = contentResolver.persistedUriPermissions.any {
+            it.uri == tree && it.isReadPermission
+        }
+        if (!permissionHeld) {
+            songs.clear()
+            return
+        }
+        if (loadCachedCatalog()) return
+        // First launch after upgrading from a version without a catalog cache.
         try {
-            val tree = Uri.parse(saved)
             songs.clear()
             scanTree(tree, DocumentsContract.getTreeDocumentId(tree), 0)
-            songs.sortBy { it.title.lowercase() }
-            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
-        } catch (_: Exception) { songs.clear() }
+            assignTrackNumbers()
+            saveCatalog()
+        } catch (_: Exception) {
+            songs.clear()
+        }
+    }
+
+    private fun assignTrackNumbers() {
+        songs.sortBy { it.title.lowercase() }
+        for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+    }
+
+    private fun loadCachedCatalog(): Boolean {
+        val indexFile = File(filesDir, "library-index.json")
+        if (!indexFile.isFile) return false
+        return try {
+            val root = JSONObject(indexFile.readText(Charsets.UTF_8))
+            val items = root.optJSONArray("songs") ?: return false
+            val restored = mutableListOf<Song>()
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val number = item.optString("number")
+                val title = item.optString("title")
+                val uriText = item.optString("uri")
+                val type = item.optString("type")
+                if (number.isBlank() || title.isBlank() || uriText.isBlank() ||
+                    type !in setOf("MP4", "MIDI", "KAR")) continue
+                restored.add(Song(number, title, Uri.parse(uriText), type,
+                    item.optString("zipEntry").takeIf { it.isNotBlank() }))
+            }
+            songs.clear()
+            songs.addAll(restored)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun saveCatalog() {
+        try {
+            val items = JSONArray()
+            songs.forEach { song ->
+                items.put(JSONObject()
+                    .put("number", song.number)
+                    .put("title", song.title)
+                    .put("uri", song.uri.toString())
+                    .put("type", song.type)
+                    .put("zipEntry", song.zipEntry ?: ""))
+            }
+            val root = JSONObject()
+                .put("version", 1)
+                .put("savedAt", System.currentTimeMillis())
+                .put("songs", items)
+            val target = File(filesDir, "library-index.json")
+            val temp = File(filesDir, "library-index.json.tmp")
+            temp.writeText(root.toString(), Charsets.UTF_8)
+            if (!temp.renameTo(target)) {
+                target.writeText(root.toString(), Charsets.UTF_8)
+                temp.delete()
+            }
+        } catch (_: Exception) {
+            // A failed cache write must not interrupt scanning or playback.
+        }
     }
 
     private fun showHome() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         content.setPadding(dp(24), dp(18), dp(24), dp(20))
         val grid = GridLayout(this).apply { columnCount = 3; rowCount = 3; useDefaultMargins = true }
@@ -224,7 +410,7 @@ class MainActivity : Activity() {
 
     private fun showRankings() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         content.addView(label("RANKINGS", 24f, true, white), lp(-1, -2, 8, 12))
         content.addView(label("Ranking statistics are not available yet. Start with the song library and reservation queue.", 16f, false, muted), lp(-1, -2, 0, 12))
@@ -232,7 +418,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLibrary() {
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         content.removeAllViews()
         val hero = card()
         hero.addView(label("YOUR HOME KARAOKE SYSTEM", 10f, true, bright))
@@ -282,7 +468,7 @@ class MainActivity : Activity() {
                 setPadding(dp(8), dp(11), dp(8), dp(11)); setBackgroundColor(if (i % 2 == 0) panel else Color.rgb(14, 14, 19))
                 isFocusable = true; isClickable = true
                 setOnClickListener { activeSong = song; playSong(song) }
-                setOnLongClickListener { if (queue.none { it.uri == song.uri }) queue.add(song); updateHeader(); Toast.makeText(this@MainActivity, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show(); true }
+                setOnLongClickListener { if (queue.none { sameSong(it, song) }) queue.add(song); updateHeader(); Toast.makeText(this@MainActivity, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show(); true }
             }
             row.addView(label(song.number, 11f, true, bright), LinearLayout.LayoutParams(dp(60), -2))
             row.addView(label(song.title, 13f, false, white), LinearLayout.LayoutParams(0, -2, 1f))
@@ -356,9 +542,14 @@ class MainActivity : Activity() {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("home_tree_uri", uri.toString()).apply()
             songs.clear()
-            scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
-            songs.sortBy { it.title.lowercase() }
-            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+            try {
+                scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
+                assignTrackNumbers()
+                saveCatalog()
+            } catch (e: Exception) {
+                songs.clear()
+                message("Could not scan the selected folder: ${e.message ?: "access failed"}")
+            }
             query = ""
             showLibrary()
             val count = songs.size
@@ -387,7 +578,41 @@ class MainActivity : Activity() {
     }
 
     private fun scanTree(tree: Uri, parentId: String, depth: Int) {
-        if (depth > 9 || songs.size >= 15000) return
+        if (depth > 12 || songs.size >= 15000) return
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)
+            while (cursor?.moveToNext() == true && songs.size < 15000) {
+                val id = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: continue
+                val mime = cursor.getString(2) ?: ""
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (isBgvFolder(name)) scanBgvTree(tree, id, depth + 1)
+                    else scanTree(tree, id, depth + 1)
+                    continue
+                }
+                val ext = name.substringAfterLast('.', "").lowercase()
+                val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                when (ext) {
+                    "mp4", "m4v" -> songs.add(Song("", name.substringBeforeLast('.', name), uri, "MP4"))
+                    "mid", "midi" -> songs.add(Song("", name.substringBeforeLast('.', name), uri, "MIDI"))
+                    "kar" -> songs.add(Song("", name.substringBeforeLast('.', name), uri, "KAR"))
+                    "zip" -> scanZipArchive(uri, name)
+                }
+            }
+        } catch (_: Exception) {
+            // Some shared-storage providers deny individual folders. Continue indexing the rest.
+        } finally { cursor?.close() }
+    }
+
+    private fun isBgvFolder(name: String): Boolean {
+        val normalized = name.trim().lowercase().replace(Regex("[ _-]+"), "")
+        return normalized in setOf("bgv", "bgvs", "backgroundvideo", "backgroundvideos", "background")
+    }
+
+    private fun scanBgvTree(tree: Uri, parentId: String, depth: Int) {
+        if (depth > 12) return
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
         var cursor: Cursor? = null
         try {
@@ -396,32 +621,83 @@ class MainActivity : Activity() {
                 val id = cursor.getString(0) ?: continue
                 val name = cursor.getString(1) ?: continue
                 val mime = cursor.getString(2) ?: ""
-                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) scanTree(tree, id, depth + 1)
-                else {
-                    val ext = name.substringAfterLast('.', "").lowercase()
-                    val type = when (ext) { "mp4", "m4v" -> "MP4"; "mid", "midi" -> "MIDI"; "kar" -> "KAR"; else -> null }
-                    if (type != null) songs.add(Song("", name.substringBeforeLast('.', name), DocumentsContract.buildDocumentUriUsingTree(tree, id), type))
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    scanBgvTree(tree, id, depth + 1)
+                } else if (mime.startsWith("video/") || name.substringAfterLast('.', "").lowercase() in setOf("mp4", "m4v", "webm", "mkv", "3gp")) {
+                    val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
+                    if (prefs.getString("bgv_uri", null).isNullOrBlank()) {
+                        prefs.edit().putString("bgv_uri", DocumentsContract.buildDocumentUriUsingTree(tree, id).toString()).apply()
+                    }
                 }
             }
         } catch (_: Exception) {
         } finally { cursor?.close() }
     }
 
+    private fun scanZipArchive(uri: Uri, archiveName: String) {
+        try {
+            contentResolver.openInputStream(uri)?.use { raw ->
+                ZipInputStream(raw.buffered()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null && songs.size < 15000) {
+                        if (!entry.isDirectory) {
+                            val entryName = entry.name
+                            val leaf = entryName.substringAfterLast('/')
+                            val ext = leaf.substringAfterLast('.', "").lowercase()
+                            val type = when (ext) { "mid", "midi" -> "MIDI"; "kar" -> "KAR"; else -> null }
+                            if (type != null && leaf.isNotBlank()) {
+                                val title = leaf.substringBeforeLast('.', leaf).ifBlank { archiveName.substringBeforeLast('.', archiveName) }
+                                songs.add(Song("", title, uri, type, entryName))
+                            }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Ignore malformed or unsupported archives rather than failing the whole library scan.
+        }
+    }
+
+    private fun materializeMidi(song: Song, destination: File) {
+        if (song.zipEntry == null) {
+            contentResolver.openInputStream(song.uri).use { input ->
+                requireNotNull(input) { "File could not be read" }
+                destination.outputStream().use { output -> input.copyTo(output) }
+            }
+            return
+        }
+        var found = false
+        contentResolver.openInputStream(song.uri).use { raw ->
+            requireNotNull(raw) { "ZIP archive could not be read" }
+            ZipInputStream(raw.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory && entry.name == song.zipEntry) {
+                        destination.outputStream().use { output -> zip.copyTo(output) }
+                        found = true
+                        break
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        }
+        require(found) { "The selected MIDI/KAR entry was not found inside its ZIP archive." }
+    }
+
+    private fun sameSong(a: Song, b: Song): Boolean = a.uri == b.uri && a.zipEntry == b.zipEntry
+
     private fun showNumberPad() {
         numberScreenActive = true
+        restoreShellChrome()
         mainNavigation?.visibility = View.GONE
         content.removeAllViews()
         content.setPadding(0, 0, 0, 0)
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val bgvUri = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("bgv_uri", null)?.let { Uri.parse(it) }
-        if (bgvUri != null) {
-            val bgv = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
-            bgvView = bgv
-            stage.addView(bgv, FrameLayout.LayoutParams(-1, -1))
-            bgv.setOnPreparedListener { mp -> mp.isLooping = true; bgv.start(); headerStatus.text = "BGV PLAYING" }
-            bgv.setOnErrorListener { _, _, _ -> headerStatus.text = "BGV UNAVAILABLE"; true }
-            try { bgv.setVideoURI(bgvUri) } catch (_: Exception) { headerStatus.text = "BGV UNAVAILABLE" }
-        }
+        if (bgvUri != null) startBgv(stage, bgvUri)
         val shade = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             setPadding(dp(28), dp(24), dp(28), dp(24))
@@ -520,19 +796,52 @@ class MainActivity : Activity() {
         val key = numberEntry.trimStart('0')
         val song = songs.firstOrNull { it.number.trimStart('0') == key || it.number == numberEntry }
         if (song == null) { message("Track number not found. Scan your song library first."); return }
-        if (queue.none { it.uri == song.uri }) queue.add(song)
+        if (queue.none { sameSong(it, song) }) queue.add(song)
         updateHeader()
         Toast.makeText(this, "Reserved: ${song.title}", Toast.LENGTH_SHORT).show()
     }
 
+    private fun startBgv(stage: FrameLayout, uri: Uri) {
+        stopBgv()
+        try {
+            val view = PlayerView(this).apply {
+                useController = false
+                setShutterBackgroundColor(Color.TRANSPARENT)
+                setBackgroundColor(Color.TRANSPARENT)
+                keepScreenOn = true
+            }
+            val player = ExoPlayer.Builder(this).build()
+            player.volume = 0f
+            player.repeatMode = Player.REPEAT_MODE_ONE
+            bgvPlayerView = view
+            bgvPlayer = player
+            view.player = player
+            stage.addView(view, 0, FrameLayout.LayoutParams(-1, -1))
+            player.addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    headerStatus.text = "BGV UNAVAILABLE"
+                }
+            })
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
+            player.playWhenReady = true
+        } catch (_: Exception) {
+            stopBgv()
+            headerStatus.text = "BGV UNAVAILABLE"
+        }
+    }
+
     private fun stopBgv() {
-        try { bgvView?.stopPlayback() } catch (_: Exception) {}
-        bgvView = null
+        try { bgvPlayer?.stop() } catch (_: Exception) {}
+        try { bgvPlayer?.release() } catch (_: Exception) {}
+        bgvPlayer = null
+        bgvPlayerView?.player = null
+        bgvPlayerView = null
     }
 
     private fun showQueue() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         stopBgv()
         content.removeAllViews()
         content.addView(label("SONG RESERVATION QUEUE", 17f, true, white), lp(-1, -2, 4, 10))
@@ -558,7 +867,7 @@ class MainActivity : Activity() {
 
     private fun showSettings() {
         numberScreenActive = false
-        mainNavigation?.visibility = View.VISIBLE
+        restoreShellChrome()
         stopBgv()
         content.removeAllViews()
         content.addView(label("SETTINGS", 20f, true, white), lp(-1, -2, 4, 10))
@@ -570,7 +879,7 @@ class MainActivity : Activity() {
         c.addView(label("Shared library: existing SongHub folder • no duplicate media storage", 12f, false, muted), lp(-1, -2, 8))
         c.addView(View(this).apply { setBackgroundColor(divider) }, lp(-1, 1, 14, 14))
         c.addView(label("PLAYBACK", 11f, true, bright))
-        c.addView(label("MP4 video: Android-supported video/audio codecs. MIDI/KAR: bundled SoundFont playback. Lyrics, scoring, microphone mixing, separate BGV overlays, and network phone-to-TV pairing are not implemented yet.", 13f, false, muted), lp(-1, -2, 6))
+        c.addView(label("MP4 video uses the device video decoder. MIDI/KAR uses the bundled SoundFont. For external lyrics, place a same-name .LRC or .TXT file beside the MIDI/KAR file. Timed lyric rendering and phone-to-TV pairing still need further work.", 13f, false, muted), lp(-1, -2, 6))
         c.addView(actionButton("PICK MP4 VIDEO", panel) { chooseVideoFile() }, lp(-1, 44, 10))
         c.addView(actionButton("PICK MIDI / KAR FILE", panel) { chooseMidiFile() }, lp(-1, 44, 8))
         c.addView(actionButton("STOP PLAYBACK", panel) { stopPlayback() }, lp(-1, 44, 8))
@@ -589,85 +898,80 @@ class MainActivity : Activity() {
     }
 
     private fun playSong(song: Song) {
+        activeSong = song
         if (song.type == "MP4") playVideo(song)
         else playMidiSong(song)
     }
 
+    @Suppress("DEPRECATION")
     private fun playVideo(song: Song) {
         numberScreenActive = false
+        activeSong = song
         stopBgv()
         stopMidi()
-        try {
-            if (videoInitialized()) {
-                try { video.stopPlayback() } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        safeStopVideo()
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val playerView = PlayerView(this).apply {
+            useController = false
+            setShutterBackgroundColor(Color.BLACK)
             setBackgroundColor(Color.BLACK)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            keepScreenOn = true
         }
-        root.addView(label("KTV MODE  •  TRACK ${song.number}", 12f, true, bright), lp(-1, -2, 0, 4))
-        root.addView(label(song.title, 18f, true, white), lp(-1, -2, 0, 6))
-        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        video = VideoView(this).apply { setBackgroundColor(Color.BLACK); keepScreenOn = true }
-        stage.addView(video, FrameLayout.LayoutParams(-1, -1))
-        val lyricOverlay = TextView(this).apply {
-            text = "KARAOKE MODE\\n\\nIf lyrics are available, place a matching .lrc or .txt file beside this video."
-            textSize = 19f
-            gravity = Gravity.CENTER
-            textAlignment = View.TEXT_ALIGNMENT_CENTER
-            setTextColor(Color.WHITE)
-            setShadowLayer(5f, 2f, 2f, Color.BLACK)
-            setBackgroundColor(Color.argb(100, 0, 0, 0))
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-        }
-        lyricOverlay.text = loadSiblingLyrics(song)
-            ?: "NO LYRICS FOUND\\nAdd a matching .lrc or .txt file beside this song."
-        stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, dp(90), Gravity.BOTTOM))
-        root.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(actionButton("LIBRARY", panel) { safeStopVideo(); showLibrary() }, weight())
-        controls.addView(actionButton("PAUSE", panel) { try { if (video.isPlaying) video.pause() } catch (_: Exception) {} }, weight())
-        controls.addView(actionButton("PLAY", red) { try { video.start() } catch (_: Exception) { message("Video could not start. Try selecting the file again.") } }, weight())
-        controls.addView(actionButton("STOP", panel) { safeStopVideo(); showLibrary() }, weight())
-        root.addView(controls, lp(-1, 46, 6))
-        root.addView(actionButton("RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
-            if (queue.none { it.uri == song.uri }) queue.add(song)
-            updateHeader()
-            Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
-        }, lp(-1, 42, 6))
+        videoView = playerView
+        root.addView(playerView, FrameLayout.LayoutParams(-1, -1))
         content.removeAllViews()
+        shellHeader?.visibility = View.GONE
+        shellAccentLine?.visibility = View.GONE
+        mainNavigation?.visibility = View.GONE
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
         content.addView(root, LinearLayout.LayoutParams(-1, -1))
         headerStatus.text = "PREPARING VIDEO"
-        video.setOnPreparedListener { mp ->
-            try {
-                mp.isLooping = false
-                video.start()
-                headerStatus.text = "KTV PLAYING"
-            } catch (e: Exception) {
-                headerStatus.text = "VIDEO ERROR"
-                message("Video could not start: ${e.message ?: "unsupported media"}")
-            }
-        }
-        video.setOnCompletionListener { headerStatus.text = "FINISHED" }
-        video.setOnErrorListener { _, what, extra ->
-            headerStatus.text = "VIDEO ERROR"
-            message("Android could not decode this MP4 (error $what/$extra). Try an H.264 video with AAC audio. If the app closes entirely, send me the phone model and Android version.")
-            true
-        }
         try {
-            video.setVideoURI(song.uri)
+            val player = ExoPlayer.Builder(this).build()
+            exoPlayer = player
+            playerView.player = player
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_BUFFERING -> headerStatus.text = "PREPARING VIDEO"
+                        Player.STATE_READY -> headerStatus.text = if (player.playWhenReady) "KTV PLAYING" else "VIDEO READY"
+                        Player.STATE_ENDED -> {
+                            if (queue.isNotEmpty()) {
+                                val next = queue.removeAt(0)
+                                updateHeader()
+                                activeSong = next
+                                playSong(next)
+                            } else headerStatus.text = "FINISHED"
+                        }
+                    }
+                }
+                override fun onPlayerError(error: PlaybackException) {
+                    headerStatus.text = "VIDEO ERROR"
+                    message("This video could not be decoded. Try an MP4 encoded as H.264 video with AAC audio. Details: ${error.errorCodeName}")
+                }
+            })
+            player.setMediaItem(MediaItem.fromUri(song.uri))
+            player.prepare()
+            player.playWhenReady = true
         } catch (e: Exception) {
+            safeStopVideo()
+            showLibrary()
             headerStatus.text = "VIDEO ERROR"
-            message("Could not open video: ${e.message ?: "unknown error"}")
+            message("Could not open video: ${e.message ?: "unsupported media"}")
         }
     }
 
-    private fun videoInitialized(): Boolean = ::video.isInitialized
-
     private fun safeStopVideo() {
-        try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
+        window.decorView.systemUiVisibility = 0
+        try { exoPlayer?.stop() } catch (_: Exception) {}
+        try { exoPlayer?.release() } catch (_: Exception) {}
+        exoPlayer = null
+        videoView?.player = null
+        videoView = null
         headerStatus.text = "READY"
     }
 
@@ -720,6 +1024,7 @@ class MainActivity : Activity() {
     private fun playMidiSong(song: Song) {
         numberScreenActive = false
         stopBgv()
+        safeStopVideo()
         stopMidi()
         try {
             val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
@@ -728,38 +1033,76 @@ class MainActivity : Activity() {
                 ?: File(filesDir, "reyna-se.sf2").also { bundled ->
                     if (!bundled.exists() || bundled.length() == 0L) assets.open("reyna-se.sf2").use { input -> bundled.outputStream().use { output -> input.copyTo(output) } }
                 }
-            val midi = File(cacheDir, "song-${song.number}.mid")
-            contentResolver.openInputStream(song.uri).use { input ->
-                requireNotNull(input) { "File could not be read" }
-                midi.outputStream().use { output -> input.copyTo(output) }
-            }
+            val safeName = song.number.ifBlank { song.title.hashCode().toString() }.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val midi = File(cacheDir, "song-$safeName.mid")
+            materializeMidi(song, midi)
             val player = MidiFilePlayer(sf.absolutePath, midi.absolutePath)
             midiPlayer = player
-            content.removeAllViews()
-            val c = card()
-            c.addView(label("NOW PLAYING  •  ${song.type}", 11f, true, bright))
-            c.addView(label(song.title, 20f, true, white), lp(-1, -2, 8))
-            val savedLyrics = getCorrectedLyrics(song)
-            c.addView(label(savedLyrics?.takeIf { it.isNotBlank() } ?: "MIDI instrument playback via bundled SoundFont. Embedded KAR lyric extraction is not available yet; you can save corrected lyrics for this song below.", 13f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 8))
-            c.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 46, 10))
-            c.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, lp(-1, 46, 8))
-            c.addView(actionButton("▶ RESTART / PLAY", red) {
+
+            val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+            val bgvUri = prefs.getString("bgv_uri", null)?.let { Uri.parse(it) }
+            if (bgvUri != null) startBgv(stage, bgvUri)
+
+            val overlay = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(14), dp(18), dp(14))
+                setBackgroundColor(Color.argb(if (bgvUri != null) 150 else 255, 5, 6, 16))
+            }
+            overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
+            overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
+            val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() } ?: loadSiblingLyrics(song)
+            val lyricsView = label(savedLyrics?.takeIf { it.isNotBlank() }
+                ?: "No matching lyrics file found. Add a same-name .LRC/.TXT file or use Edit Lyrics.",
+                24f, true, if (savedLyrics.isNullOrBlank()) muted else white).apply {
+                typeface = karaokeLyricsTypeface()
+                gravity = Gravity.CENTER
+                setShadowLayer(4f, 1f, 2f, Color.BLACK)
+                setLineSpacing(dp(5).toFloat(), 1.05f)
+            }
+            overlay.addView(lyricsView, lp(-1, -2, 12))
+            overlay.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 44, 12))
+            val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            controls.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, weight())
+            controls.addView(actionButton("▶ RESTART", red) {
                 try { player.stop(); player.close() } catch (_: Exception) {}
-                midiPlayer = null; playMidiSong(song)
-            }, lp(-1, 46, 8))
-            c.addView(actionButton("■ STOP", panel) { stopMidi(); showLibrary() }, lp(-1, 46, 8))
-            c.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
-                if (queue.none { it.uri == song.uri }) queue.add(song)
+                midiPlayer = null
+                playMidiSong(song)
+            }, weight())
+            controls.addView(actionButton("■ STOP", panel) { stopMidi(); stopBgv(); showLibrary() }, weight())
+            overlay.addView(controls, lp(-1, 44, 8))
+            overlay.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
+                if (queue.none { sameSong(it, song) }) queue.add(song)
                 updateHeader(); Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
-            }, lp(-1, 46, 8))
-            content.addView(c)
-            player.play { runOnUiThread { headerStatus.text = "FINISHED"; try { player.close() } catch (_: Exception) {}; if (midiPlayer === player) midiPlayer = null } }
-            headerStatus.text = "PLAYING MIDI"
-        } catch (e: Exception) { message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}") }
+            }, lp(-1, 42, 8))
+            stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+            content.removeAllViews()
+            shellHeader?.visibility = View.GONE
+            shellAccentLine?.visibility = View.GONE
+            mainNavigation?.visibility = View.GONE
+            content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+            player.play {
+                runOnUiThread {
+                    headerStatus.text = "FINISHED"
+                    try { player.close() } catch (_: Exception) {}
+                    if (midiPlayer === player) midiPlayer = null
+                    stopBgv()
+                    if (queue.isNotEmpty()) {
+                        val next = queue.removeAt(0)
+                        updateHeader()
+                        activeSong = next
+                        playSong(next)
+                    }
+                }
+            }
+            headerStatus.text = if (bgvUri != null) "PLAYING MIDI • BGV" else "PLAYING MIDI"
+        } catch (e: Exception) {
+            stopBgv()
+            message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}")
+        }
     }
 
     // Corrected lyrics are stored separately from the original MIDI/KAR file so the source is never overwritten.
-    private fun lyricsPreferenceKey(song: Song): String = "lyrics_override:" + song.uri.toString()
+    private fun lyricsPreferenceKey(song: Song): String = "lyrics_override:" + song.uri.toString() + (song.zipEntry?.let { "#zip:" + it } ?: "")
 
     private fun getCorrectedLyrics(song: Song): String? =
         getSharedPreferences("karaokehome_lyrics", MODE_PRIVATE).getString(lyricsPreferenceKey(song), null)
@@ -805,8 +1148,9 @@ class MainActivity : Activity() {
     private fun stopPlayback() {
         stopBgv()
         numberScreenActive = false
-        try { if (::video.isInitialized) video.stopPlayback() } catch (_: Exception) {}
+        safeStopVideo()
         stopMidi()
+        activeSong = null
         headerStatus.text = "READY"
     }
 
@@ -819,9 +1163,24 @@ class MainActivity : Activity() {
 
     private fun updateHeader() { if (::headerStatus.isInitialized) headerStatus.text = "QUEUE ${queue.size}" }
 
+    private fun restoreShellChrome() {
+        window.decorView.systemUiVisibility = 0
+        shellHeader?.visibility = View.VISIBLE
+        shellAccentLine?.visibility = View.VISIBLE
+        mainNavigation?.visibility = View.VISIBLE
+    }
+
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(14)); setBackgroundColor(panel)
     }
+    private fun karaokeLyricsTypeface(): android.graphics.Typeface {
+        return try {
+            android.graphics.Typeface.createFromAsset(assets, "RadioCanada[wdth,wght].ttf")
+        } catch (_: Exception) {
+            android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+        }
+    }
+
     private fun label(value: String, size: Float, bold: Boolean, color: Int) = TextView(this).apply {
         text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -836,7 +1195,7 @@ class MainActivity : Activity() {
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun message(value: String) { AlertDialog.Builder(this).setMessage(value).setPositiveButton("OK", null).show() }
 
-    override fun onDestroy() { stopPlayback(); super.onDestroy() }
+    override fun onDestroy() { remoteServer?.stop(); remoteServer = null; if (::headerStatus.isInitialized) stopPlayback(); super.onDestroy() }
 
     companion object {
         private const val REQUEST_FOLDER = 201
