@@ -1243,10 +1243,10 @@ class MainActivity : Activity() {
 
     private fun safeStopVideo() {
         window.decorView.systemUiVisibility = 0
+        try { videoTextureView?.let { texture -> exoPlayer?.clearVideoTextureView(texture) } } catch (_: Exception) {}
         try { exoPlayer?.stop() } catch (_: Exception) {}
         try { exoPlayer?.release() } catch (_: Exception) {}
         exoPlayer = null
-        try { videoTextureView?.let { exoPlayer?.clearVideoTextureView(it) } } catch (_: Exception) {}
         videoTextureView = null
         videoAspectContainer = null
         headerStatus.text = "READY"
