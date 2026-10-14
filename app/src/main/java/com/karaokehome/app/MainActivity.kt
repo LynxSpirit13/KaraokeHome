@@ -272,15 +272,89 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    /**
+     * Restore the last indexed catalog from app-private storage. Opening the app must not
+     * enumerate thousands of files (or reopen every ZIP) on each launch.
+     */
     private fun loadSavedLibrary() {
-        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE).getString("home_tree_uri", null) ?: return
+        val saved = getSharedPreferences("karaokehome", MODE_PRIVATE)
+            .getString("home_tree_uri", null) ?: return
+        val tree = Uri.parse(saved)
+        val permissionHeld = contentResolver.persistedUriPermissions.any {
+            it.uri == tree && it.isReadPermission
+        }
+        if (!permissionHeld) {
+            songs.clear()
+            return
+        }
+        if (loadCachedCatalog()) return
+        // First launch after upgrading from a version without a catalog cache.
         try {
-            val tree = Uri.parse(saved)
             songs.clear()
             scanTree(tree, DocumentsContract.getTreeDocumentId(tree), 0)
-            songs.sortBy { it.title.lowercase() }
-            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
-        } catch (_: Exception) { songs.clear() }
+            assignTrackNumbers()
+            saveCatalog()
+        } catch (_: Exception) {
+            songs.clear()
+        }
+    }
+
+    private fun assignTrackNumbers() {
+        songs.sortBy { it.title.lowercase() }
+        for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+    }
+
+    private fun loadCachedCatalog(): Boolean {
+        val indexFile = File(filesDir, "library-index.json")
+        if (!indexFile.isFile) return false
+        return try {
+            val root = JSONObject(indexFile.readText(Charsets.UTF_8))
+            val items = root.optJSONArray("songs") ?: return false
+            val restored = mutableListOf<Song>()
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val number = item.optString("number")
+                val title = item.optString("title")
+                val uriText = item.optString("uri")
+                val type = item.optString("type")
+                if (number.isBlank() || title.isBlank() || uriText.isBlank() ||
+                    type !in setOf("MP4", "MIDI", "KAR")) continue
+                restored.add(Song(number, title, Uri.parse(uriText), type,
+                    item.optString("zipEntry").takeIf { it.isNotBlank() }))
+            }
+            songs.clear()
+            songs.addAll(restored)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun saveCatalog() {
+        try {
+            val items = JSONArray()
+            songs.forEach { song ->
+                items.put(JSONObject()
+                    .put("number", song.number)
+                    .put("title", song.title)
+                    .put("uri", song.uri.toString())
+                    .put("type", song.type)
+                    .put("zipEntry", song.zipEntry ?: ""))
+            }
+            val root = JSONObject()
+                .put("version", 1)
+                .put("savedAt", System.currentTimeMillis())
+                .put("songs", items)
+            val target = File(filesDir, "library-index.json")
+            val temp = File(filesDir, "library-index.json.tmp")
+            temp.writeText(root.toString(), Charsets.UTF_8)
+            if (!temp.renameTo(target)) {
+                target.writeText(root.toString(), Charsets.UTF_8)
+                temp.delete()
+            }
+        } catch (_: Exception) {
+            // A failed cache write must not interrupt scanning or playback.
+        }
     }
 
     private fun showHome() {
@@ -468,9 +542,14 @@ class MainActivity : Activity() {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("home_tree_uri", uri.toString()).apply()
             songs.clear()
-            scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
-            songs.sortBy { it.title.lowercase() }
-            for (i in songs.indices) songs[i] = songs[i].copy(number = "%06d".format(i + 1))
+            try {
+                scanTree(uri, DocumentsContract.getTreeDocumentId(uri), 0)
+                assignTrackNumbers()
+                saveCatalog()
+            } catch (e: Exception) {
+                songs.clear()
+                message("Could not scan the selected folder: ${e.message ?: "access failed"}")
+            }
             query = ""
             showLibrary()
             val count = songs.size
