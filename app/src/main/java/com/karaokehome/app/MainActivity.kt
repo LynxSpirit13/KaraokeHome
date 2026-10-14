@@ -142,6 +142,18 @@ class MainActivity : Activity() {
         .put("activeTitle", activeSong?.title ?: "")
         .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
 
+    @Deprecated("Android back navigation")
+    override fun onBackPressed() {
+        if (exoPlayer != null || midiPlayer != null || bgvPlayer != null) {
+            stopPlayback()
+            showLibrary()
+        } else if (::content.isInitialized) {
+            showHome()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         when (keyCode) {
