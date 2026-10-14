@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "KaraokeHome"
-include(":app")
+include(":app", ":smartlink")
