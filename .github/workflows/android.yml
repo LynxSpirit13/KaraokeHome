@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "fix/**" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "feature/integrated-phone-tv-build" ]
   workflow_dispatch:
 
 permissions:
