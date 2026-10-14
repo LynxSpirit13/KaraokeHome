@@ -105,12 +105,23 @@ class SmartLinkActivity : Activity() {
         queueInfo = TextView(this).apply { text = "Queue: —"; textSize = 13f; setTextColor(muted) }
         root.addView(queueInfo)
 
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(actionButton("Pause") { sendCommand("pause") })
-        controls.addView(actionButton("Resume") { sendCommand("resume") })
-        controls.addView(actionButton("Stop") { sendCommand("stop") })
-        controls.addView(actionButton("Queue") { sendCommand("queue") })
-        root.addView(controls)
+        val transport = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        transport.addView(actionButton("⏮ Previous") { sendCommand("previous") },
+            LinearLayout.LayoutParams(0, 46, 1f))
+        transport.addView(actionButton("Ⅱ Pause") { sendCommand("pause") },
+            LinearLayout.LayoutParams(0, 46, 1f))
+        transport.addView(actionButton("▶ Resume") { sendCommand("resume") },
+            LinearLayout.LayoutParams(0, 46, 1f))
+        transport.addView(actionButton("Next ⏭") { sendCommand("next") },
+            LinearLayout.LayoutParams(0, 46, 1f))
+        root.addView(transport)
+
+        val utilityControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        utilityControls.addView(actionButton("■ Stop") { sendCommand("stop") },
+            LinearLayout.LayoutParams(0, 42, 1f).apply { rightMargin = 6 })
+        utilityControls.addView(actionButton("View queue") { sendCommand("queue") },
+            LinearLayout.LayoutParams(0, 42, 1f))
+        root.addView(utilityControls)
 
         root.addView(TextView(this).apply {
             text = "LYRICS FROM TV"
