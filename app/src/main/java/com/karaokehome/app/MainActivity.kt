@@ -1084,7 +1084,7 @@ class MainActivity : Activity() {
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun message(value: String) { AlertDialog.Builder(this).setMessage(value).setPositiveButton("OK", null).show() }
 
-    override fun onDestroy() { remoteServer?.stop(); remoteServer = null; stopPlayback(); super.onDestroy() }
+    override fun onDestroy() { remoteServer?.stop(); remoteServer = null; if (::headerStatus.isInitialized) stopPlayback(); super.onDestroy() }
 
     companion object {
         private const val REQUEST_FOLDER = 201
