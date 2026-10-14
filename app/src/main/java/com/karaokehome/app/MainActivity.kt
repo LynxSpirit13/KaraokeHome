@@ -114,7 +114,7 @@ class MainActivity : Activity() {
                         pausePlayback()
                         response = remoteStatus("Paused")
                     }
-                    "resume", "play" -> {
+                    "resume" -> {
                         resumePlayback()
                         response = remoteStatus("Playback resumed")
                     }
@@ -1057,7 +1057,7 @@ class MainActivity : Activity() {
             queue.removeAt(0)
         } else {
             val currentIndex = activeSong?.let { current -> songs.indexOfFirst { sameSong(it, current) } } ?: -1
-            if (songs.isEmpty()) null else songs[(currentIndex + 1).coerceAtMost(songs.lastIndex)]
+            if (songs.isEmpty()) null else songs[(currentIndex + 1).mod(songs.size)]
         }
         if (next == null) {
             message("No songs are available. Scan your library first.")
