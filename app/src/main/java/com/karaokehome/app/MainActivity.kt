@@ -979,8 +979,10 @@ class MainActivity : Activity() {
             }, lp(-1, 42, 8))
             stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
             content.removeAllViews()
+            shellHeader?.visibility = View.GONE
+            shellAccentLine?.visibility = View.GONE
             mainNavigation?.visibility = View.GONE
-            content.addView(stage, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels - dp(105)).coerceAtLeast(dp(320))))
+            content.addView(stage, LinearLayout.LayoutParams(-1, -1))
             player.play {
                 runOnUiThread {
                     headerStatus.text = "FINISHED"
