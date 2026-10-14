@@ -29,10 +29,12 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Copy SoundFont into Android assets
+      - name: Copy playback assets into Android assets
         run: |
           mkdir -p app/src/main/assets
           cp "reyna se.sf2" app/src/main/assets/reyna-se.sf2
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/RadioCanada%5Bwdth%2Cwght%5D.ttf" --output "app/src/main/assets/RadioCanada[wdth,wght].ttf"
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/OFL.txt" --output "app/src/main/assets/OFL-RadioCanada.txt"
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
