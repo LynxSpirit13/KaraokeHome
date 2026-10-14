@@ -15,9 +15,15 @@ Planned capabilities include:
 - Local Wi-Fi operation without requiring an internet connection.
 - Separate, purpose-built interfaces for phone and Android TV.
 
+## Media folder and scanning
+
+The intended user-managed folder is `KaraokeHome/`, with `songs/`, `bgvs/`, `fonts/`, `soundfonts/`, `assets/`, and app-generated metadata under `data/`. Put MP4 videos, MIDI files, KAR files, and ZIP archives containing supported songs in `songs/`. The scanner should index supported MIDI/KAR/MP4 entries inside ZIP archives without needlessly extracting duplicate files.
+
+Read [Asset folder layout and scanning](docs/ASSET_LAYOUT.md) before changing storage or scanner behavior. Android generally cannot create an arbitrary public folder at installation time; setup should create it on first launch where permitted or guide the user through selecting a folder and granting access.
+
 ## Contributing
 
-We welcome bug reports, documentation improvements, testing, and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md). Please be specific about device type, Android version, media format, expected behavior, and actual behavior. Do not upload copyrighted karaoke media or personal song libraries.
+We welcome bug reports, documentation improvements, testing, and pull requests. Start with the [Contributor orientation](docs/CONTRIBUTOR_GUIDE.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Please be specific about device type, Android version, media format, expected behavior, and actual behavior. Do not upload copyrighted karaoke media or personal song libraries.
 
 ## Build
 
