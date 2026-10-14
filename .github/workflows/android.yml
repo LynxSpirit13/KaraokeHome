@@ -2,9 +2,9 @@ name: Build KaraokeHome Android
 
 on:
   push:
-    branches: [ "main", "fix/**", "feature/integrated-phone-tv-build" ]
+    branches: [ "main", "fix/**", "feature/integrated-phone-tv-build", "feature/separate-smart-link-app" ]
   pull_request:
-    branches: [ "main", "feature/integrated-phone-tv-build" ]
+    branches: [ "main", "feature/integrated-phone-tv-build", "feature/separate-smart-link-app" ]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build player and Smart Link APKs
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -36,12 +36,19 @@ jobs:
           curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/RadioCanada%5Bwdth%2Cwght%5D.ttf" --output "app/src/main/assets/RadioCanada[wdth,wght].ttf"
           curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/OFL.txt" --output "app/src/main/assets/OFL-RadioCanada.txt"
 
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build both Android apps
+        run: gradle --no-daemon :app:assembleDebug :smartlink:assembleDebug
 
-      - name: Upload APK
+      - name: Upload KaraokeHome player APK
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeHome-debug-apk
+          name: KaraokeHome-player-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Smart Link remote APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaraokeHome-Smart-Link-debug-apk
+          path: smartlink/build/outputs/apk/debug/smartlink-debug.apk
           if-no-files-found: error
