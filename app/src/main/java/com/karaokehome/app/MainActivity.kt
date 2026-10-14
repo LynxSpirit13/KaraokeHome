@@ -163,7 +163,7 @@ class MainActivity : Activity() {
         numberScreenActive = false
         content.removeAllViews()
         content.setPadding(dp(24), dp(18), dp(24), dp(20))
-        val grid = GridLayout(this).apply { columnCount = 3; rowCount = 2; useDefaultMargins = true }
+        val grid = GridLayout(this).apply { columnCount = 3; rowCount = 3; useDefaultMargins = true }
         fun tile(title: String, symbol: String, color: Int, row: Int, col: Int, span: Int = 1, action: () -> Unit) {
             val b = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -185,9 +185,9 @@ class MainActivity : Activity() {
         tile("ENTER KARAOKE", "♫", Color.rgb(155, 25, 90), 0, 0, 2) { numberEntry = ""; showNumberPad() }
         tile("MEDIA PLAYER", "▣", Color.rgb(105, 40, 145), 0, 2) { showLibrary() }
         tile("RANKINGS", "🏆", Color.rgb(30, 80, 155), 1, 2) { showRankings() }
-        tile("SONG SEARCH", "♫⌕", Color.rgb(160, 55, 40), 1, 0) { showLibrary() }
-        tile("ARTIST SEARCH", "♟⌕", Color.rgb(170, 120, 35), 1, 1) { showLibrary() }
-        tile("NEW SONGS", "♫", Color.rgb(25, 105, 65), 1, 2) { showLibrary() }
+        tile("SONG SEARCH", "♫⌕", Color.rgb(160, 55, 40), 2, 0) { showLibrary() }
+        tile("ARTIST SEARCH", "♟⌕", Color.rgb(170, 120, 35), 2, 1) { showLibrary() }
+        tile("NEW SONGS", "♫", Color.rgb(25, 105, 65), 2, 2) { showLibrary() }
         // Keep the reference's colorful tile layout while offering simple access to settings.
         content.addView(TextView(this).apply {
             text = "KaraokeHome"; textSize = 30f; setTextColor(white); gravity = Gravity.CENTER
