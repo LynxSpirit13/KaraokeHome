@@ -3,6 +3,7 @@ package com.karaokehome.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.Configuration
 import android.database.Cursor
 import android.graphics.Color
 import android.net.Uri
@@ -14,6 +15,10 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
 import dev.kotlinds.fluidsynthkmp.MidiFilePlayer
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.io.File
 import java.util.zip.ZipInputStream
 import androidx.media3.common.MediaItem
@@ -42,6 +47,7 @@ class MainActivity : Activity() {
     private lateinit var headerStatus: TextView
     private var exoPlayer: ExoPlayer? = null
     private var videoView: PlayerView? = null
+    private var remoteServer: LanRemoteServer? = null
     private val bg = Color.rgb(8, 8, 12)
     private val panel = Color.rgb(19, 19, 25)
     private val red = Color.rgb(224, 18, 39)
@@ -52,11 +58,82 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val deviceMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+        if (deviceMode != Configuration.UI_MODE_TYPE_TELEVISION) {
+            startActivity(Intent(this, RemoteActivity::class.java))
+            finish()
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
         loadSavedLibrary()
+        remoteServer = LanRemoteServer(::handleRemoteRequest).also { it.start() }
         showHome()
     }
+
+    /** Handle phone commands on the UI thread because the song catalog and players are UI-owned. */
+    private fun handleRemoteRequest(request: JSONObject): JSONObject {
+        var response = JSONObject().put("ok", false).put("error", "TV did not respond")
+        val latch = CountDownLatch(1)
+        runOnUiThread {
+            try {
+                when (request.optString("action")) {
+                    "library" -> {
+                        val list = JSONArray()
+                        songs.forEachIndexed { index, song ->
+                            list.put(JSONObject().put("index", index).put("number", song.number)
+                                .put("title", song.title).put("type", song.type))
+                        }
+                        response = JSONObject().put("ok", true).put("songs", list)
+                            .put("queueCount", queue.size).put("status", headerStatus.text.toString())
+                            .put("activeTitle", activeSong?.title ?: "")
+                            .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
+                    }
+                    "reserve", "play" -> {
+                        val index = request.optInt("index", -1)
+                        val song = songs.getOrNull(index)
+                        if (song == null) {
+                            response = JSONObject().put("ok", false).put("error", "Song not found. Reload the TV library.")
+                        } else {
+                            if (request.optString("action") == "reserve") {
+                                if (queue.none { sameSong(it, song) }) queue.add(song)
+                                updateHeader()
+                                response = remoteStatus("Reserved: " + song.title)
+                            } else {
+                                activeSong = song
+                                playSong(song)
+                                response = remoteStatus("Playing: " + song.title)
+                            }
+                        }
+                    }
+                    "pause" -> {
+                        try { exoPlayer?.pause() } catch (_: Exception) {}
+                        try { midiPlayer?.pause() } catch (_: Exception) {}
+                        response = remoteStatus("Paused")
+                    }
+                    "resume" -> {
+                        try { exoPlayer?.play() } catch (_: Exception) {}
+                        response = remoteStatus("Resume requested")
+                    }
+                    "stop" -> {
+                        stopPlayback()
+                        response = remoteStatus("Playback stopped")
+                    }
+                    "status", "queue" -> response = remoteStatus("Connected")
+                    else -> response = JSONObject().put("ok", false).put("error", "Unknown remote command")
+                }
+            } catch (e: Exception) {
+                response = JSONObject().put("ok", false).put("error", e.message ?: "Command failed")
+            } finally { latch.countDown() }
+        }
+        latch.await(4, TimeUnit.SECONDS)
+        return response
+    }
+
+    private fun remoteStatus(message: String) = JSONObject().put("ok", true)
+        .put("status", message).put("queueCount", queue.size)
+        .put("activeTitle", activeSong?.title ?: "")
+        .put("lyrics", activeSong?.let { getCorrectedLyrics(it) ?: loadSiblingLyrics(it) } ?: "")
 
     // Android TV remotes send standard DPAD/numeric/color-button key codes on many devices.
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
@@ -714,6 +791,7 @@ class MainActivity : Activity() {
     }
 
     private fun playSong(song: Song) {
+        activeSong = song
         if (song.type == "MP4") playVideo(song)
         else playMidiSong(song)
     }
@@ -988,7 +1066,7 @@ class MainActivity : Activity() {
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun message(value: String) { AlertDialog.Builder(this).setMessage(value).setPositiveButton("OK", null).show() }
 
-    override fun onDestroy() { stopPlayback(); super.onDestroy() }
+    override fun onDestroy() { remoteServer?.stop(); remoteServer = null; stopPlayback(); super.onDestroy() }
 
     companion object {
         private const val REQUEST_FOLDER = 201
