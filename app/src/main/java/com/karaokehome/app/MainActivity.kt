@@ -862,8 +862,15 @@ class MainActivity : Activity() {
             overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
             overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
             val savedLyrics = getCorrectedLyrics(song)?.takeIf { it.isNotBlank() } ?: loadSiblingLyrics(song)
-            overlay.addView(label(savedLyrics?.takeIf { it.isNotBlank() }
-                ?: "No matching lyrics file found. Add a same-name .LRC/.TXT file or use Edit Lyrics.", 16f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 10))
+            val lyricsView = label(savedLyrics?.takeIf { it.isNotBlank() }
+                ?: "No matching lyrics file found. Add a same-name .LRC/.TXT file or use Edit Lyrics.",
+                24f, true, if (savedLyrics.isNullOrBlank()) muted else white).apply {
+                typeface = karaokeLyricsTypeface()
+                gravity = Gravity.CENTER
+                setShadowLayer(4f, 1f, 2f, Color.BLACK)
+                setLineSpacing(dp(5).toFloat(), 1.05f)
+            }
+            overlay.addView(lyricsView, lp(-1, -2, 12))
             overlay.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 44, 12))
             val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             controls.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, weight())
@@ -961,6 +968,14 @@ class MainActivity : Activity() {
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(14)); setBackgroundColor(panel)
     }
+    private fun karaokeLyricsTypeface(): android.graphics.Typeface {
+        return try {
+            android.graphics.Typeface.createFromAsset(assets, "RadioCanada[wdth,wght].ttf")
+        } catch (_: Exception) {
+            android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+        }
+    }
+
     private fun label(value: String, size: Float, bold: Boolean, color: Int) = TextView(this).apply {
         text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
