@@ -11,6 +11,7 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
+import java.io.OutputStreamWriter
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -110,9 +111,10 @@ class RemoteActivity : Activity() {
                 }
             } catch (_: Exception) {}
             runOnUiThread {
-                if (found != null) {
-                    host.setText(found)
-                    status.text = "Found TV at $found. Tap CONNECT / LOAD SONGS."
+                val address = found
+                if (address != null) {
+                    host.setText(address)
+                    status.text = "Found TV at $address. Tap CONNECT / LOAD SONGS."
                 } else status.text = "TV not found automatically. Enter its local IP address and connect."
             }
         }
@@ -161,7 +163,7 @@ class RemoteActivity : Activity() {
             Socket().use { socket ->
                 socket.connect(InetSocketAddress(ip, LanRemoteServer.PORT), 2500)
                 socket.soTimeout = 3500
-                PrintWriter(socket.getOutputStream(), true, Charsets.UTF_8).use { it.println(body.toString()) }
+                PrintWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8), true).use { it.println(body.toString()) }
                 BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8)).use { reader ->
                     JSONObject(reader.readLine() ?: return JSONObject().put("ok", false).put("error", "TV returned no response"))
                 }
