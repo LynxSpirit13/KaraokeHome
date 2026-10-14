@@ -1090,6 +1090,7 @@ class MainActivity : Activity() {
     private fun playVideo(song: Song) {
         numberScreenActive = false
         activeSong = song
+        activeLyrics = ""
         stopBgv()
         stopMidi()
         safeStopVideo()
@@ -1335,6 +1336,7 @@ class MainActivity : Activity() {
     }
 
     private fun stopPlayback() {
+        activeLyrics = ""
         stopBgv()
         midiPaused = false
         numberScreenActive = false
@@ -1372,11 +1374,13 @@ class MainActivity : Activity() {
     }
 
     private fun label(value: String, size: Float, bold: Boolean, color: Int) = TextView(this).apply {
-        text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
+        text = value
+        textSize = if (resources.configuration.screenWidthDp < 600) maxOf(size, 12f) else size
+        setTextColor(color); gravity = Gravity.CENTER_VERTICAL
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
     private fun actionButton(value: String, color: Int, action: () -> Unit) = Button(this).apply {
-        text = value; textSize = 12f; isAllCaps = false; setTextColor(white); setBackgroundColor(color)
+        text = value; textSize = if (resources.configuration.screenWidthDp < 600) 14f else 12f; isAllCaps = false; setTextColor(white); setBackgroundColor(color)
         isFocusable = true; isClickable = true
         setPadding(dp(8), dp(4), dp(8), dp(4))
         setOnFocusChangeListener { view, focused ->
