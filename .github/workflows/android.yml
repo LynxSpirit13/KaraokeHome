@@ -1,8 +1,12 @@
-name: Build KaraokeHome Android
+name: Build KaraokeHome Full Test Package
+
+concurrency:
+  group: karaokehome-full-test-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/**", "feature/integrated-phone-tv-build", "feature/separate-smart-link-app" ]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build complete Player and Smart Link package
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -27,17 +31,39 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Copy SoundFont into Android assets
+      - name: Copy playback assets into Android assets
         run: |
           mkdir -p app/src/main/assets
           cp "reyna se.sf2" app/src/main/assets/reyna-se.sf2
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/RadioCanada%5Bwdth%2Cwght%5D.ttf" --output "app/src/main/assets/RadioCanada[wdth,wght].ttf"
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/OFL.txt" --output "app/src/main/assets/OFL-RadioCanada.txt"
 
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Run karaoke player unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
 
-      - name: Upload APK
+      - name: Build both Android apps
+        run: gradle --no-daemon :app:assembleDebug :smartlink:assembleDebug
+
+      - name: Assemble one complete test package
+        run: |
+          mkdir -p dist/KaraokeHome-Full-Test-Build
+          cp app/build/outputs/apk/debug/app-debug.apk dist/KaraokeHome-Full-Test-Build/KaraokeHome-Player-debug.apk
+          cp smartlink/build/outputs/apk/debug/smartlink-debug.apk dist/KaraokeHome-Full-Test-Build/KaraokeHome-Smart-Link-debug.apk
+          cat > dist/KaraokeHome-Full-Test-Build/INSTALL-AND-TEST.txt <<'EOF'
+          KaraokeHome full test build
+
+          1. Install KaraokeHome-Player-debug.apk on the Android TV.
+          2. Install the SAME KaraokeHome-Player-debug.apk on the Android phone to test standalone phone karaoke.
+          3. Install KaraokeHome-Smart-Link-debug.apk on a second phone to test TV remote control.
+          4. Keep the TV and Smart Link phone on the same local Wi-Fi network.
+          5. Report the exact step, device, song format (MP4/MIDI/KAR), and what happened when a test fails.
+          EOF
+          cd dist
+          zip -r KaraokeHome-Full-Test-Build.zip KaraokeHome-Full-Test-Build
+
+      - name: Upload single complete test package
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeHome-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: KaraokeHome-Full-Test-Build
+          path: dist/KaraokeHome-Full-Test-Build.zip
           if-no-files-found: error
