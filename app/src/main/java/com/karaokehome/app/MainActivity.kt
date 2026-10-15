@@ -204,7 +204,7 @@ class MainActivity : Activity() {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
                 numberEntry = (numberEntry + digit).take(7)
                 if (isTelevisionUi()) {
-                    if (exoPlayer == null && midiPlayer == null) showNumberPad()
+                    if (exoPlayer == null && midiPlayer == null && tvNumberDisplay == null) showNumberPad()
                     tvNumberDisplay?.text = numberEntry.padStart(7, '0').takeLast(7)
                     headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
                     Toast.makeText(this, "TRACK  " + numberEntry.padStart(7, '0'), Toast.LENGTH_SHORT).show()
@@ -225,6 +225,7 @@ class MainActivity : Activity() {
                 if (isTelevisionUi() && numberEntry.isNotEmpty()) {
                     reserveEnteredNumber()
                     numberEntry = ""
+                    tvNumberDisplay?.text = "0000000"
                     headerStatus.text = "RESERVED • QUEUE " + queue.size
                 } else showQueue()
                 return true
@@ -255,6 +256,7 @@ class MainActivity : Activity() {
                 if (numberEntry.isNotEmpty()) {
                     numberEntry = numberEntry.dropLast(1)
                     if (isTelevisionUi()) {
+                        if (tvNumberDisplay == null && exoPlayer == null && midiPlayer == null) showNumberPad()
                         tvNumberDisplay?.text = numberEntry.padStart(7, '0').takeLast(7)
                     } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                     return true
@@ -265,7 +267,7 @@ class MainActivity : Activity() {
                     numberEntry = ""
                     if (isTelevisionUi()) {
                         tvNumberDisplay?.text = "0000000"
-                        if (exoPlayer == null && midiPlayer == null) showNumberPad()
+                        if (tvNumberDisplay == null && exoPlayer == null && midiPlayer == null) showNumberPad()
                     } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                     return true
                 }
@@ -507,6 +509,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLibrary() {
+        numberScreenActive = false
         restoreShellChrome()
         content.minimumHeight = 0
         content.setPadding(dp(12), dp(4), dp(12), dp(16))
@@ -1322,7 +1325,14 @@ class MainActivity : Activity() {
                                 updateHeader()
                                 activeSong = next
                                 playSong(next)
-                            } else headerStatus.text = "FINISHED"
+                            } else {
+                                headerStatus.text = "FINISHED"
+                                if (isTelevisionUi()) {
+                                    safeStopVideo()
+                                    activeSong = null
+                                    showNumberPad()
+                                }
+                            }
                         }
                     }
                 }
@@ -1498,6 +1508,9 @@ class MainActivity : Activity() {
                         updateHeader()
                         activeSong = next
                         playSong(next)
+                    } else if (isTelevisionUi()) {
+                        activeSong = null
+                        showNumberPad()
                     }
                 }
             }
