@@ -672,8 +672,8 @@ class MainActivity : Activity() {
         } else if (requestCode == REQUEST_PICK_BGV) {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("bgv_uri", uri.toString()).apply()
-            if (numberScreenActive || isTelevisionUi()) showNumberPad()
-            else message("BGV saved. Open Enter Karaoke to preview it.")
+            if (numberScreenActive || (isTelevisionUi() && exoPlayer == null && midiPlayer == null)) showNumberPad()
+            else message("BGV saved. It will be used on the next idle preview or MIDI/KAR song.")
         }
     }
 
