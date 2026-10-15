@@ -38,6 +38,9 @@ jobs:
           curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/RadioCanada%5Bwdth%2Cwght%5D.ttf" --output "app/src/main/assets/RadioCanada[wdth,wght].ttf"
           curl --fail --location --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/OFL.txt" --output "app/src/main/assets/OFL-RadioCanada.txt"
 
+      - name: Run karaoke player unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Build both Android apps
         run: gradle --no-daemon :app:assembleDebug :smartlink:assembleDebug
 
