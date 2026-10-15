@@ -31,7 +31,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 
 class MainActivity : Activity() {
     private data class Song(val number: String, val title: String, val uri: Uri, val type: String, val zipEntry: String? = null)
@@ -60,7 +59,9 @@ class MainActivity : Activity() {
         }
     }
     private var bgvPlayer: ExoPlayer? = null
-    private var bgvPlayerView: PlayerView? = null
+    private var bgvTextureView: TextureView? = null
+    private var bgvAspectContainer: androidx.media3.ui.AspectRatioFrameLayout? = null
+    private var tvNumberDisplay: TextView? = null
     private var mainNavigation: View? = null
     private var shellHeader: View? = null
     private var shellAccentLine: View? = null
@@ -82,6 +83,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         val deviceMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
         val isTelevision = deviceMode == Configuration.UI_MODE_TYPE_TELEVISION
+        if (isTelevision) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         buildShell()
         loadSavedLibrary()
@@ -200,6 +204,8 @@ class MainActivity : Activity() {
                 val digit = (keyCode - android.view.KeyEvent.KEYCODE_0).toString()
                 numberEntry = (numberEntry + digit).take(7)
                 if (isTelevisionUi()) {
+                    if (exoPlayer == null && midiPlayer == null) showNumberPad()
+                    tvNumberDisplay?.text = numberEntry.padStart(7, '0').takeLast(7)
                     headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
                     Toast.makeText(this, "TRACK  " + numberEntry.padStart(7, '0'), Toast.LENGTH_SHORT).show()
                 } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
@@ -247,12 +253,21 @@ class MainActivity : Activity() {
             android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL -> {
                 if (numberEntry.isNotEmpty()) {
                     numberEntry = numberEntry.dropLast(1)
-                    if (numberScreenActive) updateNumberDisplay() else showNumberPad()
+                    if (isTelevisionUi()) {
+                        tvNumberDisplay?.text = numberEntry.padStart(7, '0').takeLast(7)
+                    } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
                     return true
                 }
             }
             android.view.KeyEvent.KEYCODE_ESCAPE, android.view.KeyEvent.KEYCODE_BACK -> {
-                if (numberEntry.isNotEmpty()) { numberEntry = ""; if (numberScreenActive) updateNumberDisplay() else showNumberPad(); return true }
+                if (numberEntry.isNotEmpty()) {
+                    numberEntry = ""
+                    if (isTelevisionUi()) {
+                        tvNumberDisplay?.text = "0000000"
+                        if (exoPlayer == null && midiPlayer == null) showNumberPad()
+                    } else if (numberScreenActive) updateNumberDisplay() else showNumberPad()
+                    return true
+                }
             }
         }
         return super.onKeyDown(keyCode, event)
@@ -464,7 +479,9 @@ class MainActivity : Activity() {
                 })
             }.also { it.tag = "homeMenu:$title" }
         }
-        menu.addView(menuTile("KARAOKE", "♫", Color.rgb(155, 25, 90)) { showLibrary() },
+        menu.addView(menuTile("KARAOKE", "♫", Color.rgb(155, 25, 90)) {
+            if (isTelevisionUi()) showNumberPad() else showLibrary()
+        },
             LinearLayout.LayoutParams(0, dp(190), 1f).apply { marginEnd = dp(10) })
         menu.addView(menuTile("SETTINGS", "⚙", Color.rgb(48, 50, 66)) { showSettings() },
             LinearLayout.LayoutParams(0, dp(190), 1f).apply { marginStart = dp(10) })
@@ -651,7 +668,8 @@ class MainActivity : Activity() {
         } else if (requestCode == REQUEST_PICK_BGV) {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             getSharedPreferences("karaokehome", MODE_PRIVATE).edit().putString("bgv_uri", uri.toString()).apply()
-            if (numberScreenActive) showNumberPad() else message("BGV saved. Open Enter Karaoke to preview it.")
+            if (numberScreenActive || isTelevisionUi()) showNumberPad()
+            else message("BGV saved. Open Enter Karaoke to preview it.")
         }
     }
 
@@ -772,12 +790,14 @@ class MainActivity : Activity() {
 
     private fun showNumberPad() {
         if (isTelevisionUi()) {
-            numberScreenActive = false
-            headerStatus.text = "TRACK  " + numberEntry.padStart(7, '0')
+            showTelevisionKaraokeIdle()
             return
         }
         numberScreenActive = true
         restoreShellChrome()
+        enterKaraokeFullscreen()
+        shellHeader?.visibility = View.GONE
+        shellAccentLine?.visibility = View.GONE
         mainNavigation?.visibility = View.GONE
         content.removeAllViews()
         content.setPadding(0, 0, 0, 0)
@@ -900,6 +920,64 @@ class MainActivity : Activity() {
         content.addView(stage, LinearLayout.LayoutParams(-1, -1))
     }
 
+    private fun showTelevisionKaraokeIdle() {
+        numberScreenActive = false
+        restoreShellChrome()
+        enterKaraokeFullscreen()
+        shellHeader?.visibility = View.GONE
+        shellAccentLine?.visibility = View.GONE
+        mainNavigation?.visibility = View.GONE
+        content.setPadding(0, 0, 0, 0)
+        content.minimumHeight = resources.displayMetrics.heightPixels
+        content.removeAllViews()
+
+        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val bgvUri = getSharedPreferences("karaokehome", MODE_PRIVATE)
+            .getString("bgv_uri", null)?.let { Uri.parse(it) }
+        if (bgvUri != null) startBgv(stage, bgvUri)
+
+        val overlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(28), dp(20), dp(28), dp(20))
+            setBackgroundColor(Color.argb(if (bgvUri != null) 92 else 255, 4, 5, 18))
+        }
+        overlay.addView(label("ENTER SONG", 24f, true, Color.rgb(255, 220, 0)).apply {
+            gravity = Gravity.CENTER
+        }, lp(-1, -2, 0, 12))
+        tvNumberDisplay = label(numberEntry.padStart(7, '0').takeLast(7), 52f, true, Color.rgb(255, 225, 0)).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(22), dp(12), dp(22), dp(12))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.rgb(12, 12, 18))
+                cornerRadius = dp(4).toFloat()
+                setStroke(dp(2), Color.rgb(230, 190, 0))
+            }
+        }
+        overlay.addView(tvNumberDisplay, lp(-1, -2, 0, 18))
+        overlay.addView(label("Use the TV remote number keys • OK to play • GREEN to reserve", 15f, true, white).apply {
+            gravity = Gravity.CENTER
+        }, lp(-1, -2, 0, 8))
+        overlay.addView(label("RED: SEARCH     YELLOW: CHANGE BGV     BLUE: SOUNDFONT", 12f, false, white).apply {
+            gravity = Gravity.CENTER
+        }, lp(-1, -2))
+        stage.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        content.addView(stage, LinearLayout.LayoutParams(-1, -1))
+        headerStatus.text = "ENTER SONG  " + numberEntry.padStart(7, '0')
+    }
+
+    @Suppress("DEPRECATION")
+    private fun enterKaraokeFullscreen() {
+        if (isTelevisionUi()) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+    }
+
     private fun adjustKaraokeSetting(name: String, delta: Int) {
         val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
         val key = "karaoke_" + name
@@ -944,20 +1022,27 @@ class MainActivity : Activity() {
     private fun startBgv(stage: FrameLayout, uri: Uri) {
         stopBgv()
         try {
-            val view = PlayerView(this).apply {
-                useController = false
-                setShutterBackgroundColor(Color.TRANSPARENT)
-                setBackgroundColor(Color.TRANSPARENT)
-                keepScreenOn = true
+            // TextureView stays in the normal view hierarchy so lyric overlays reliably render above it.
+            val aspect = androidx.media3.ui.AspectRatioFrameLayout(this).apply {
+                setBackgroundColor(Color.BLACK)
+                setResizeMode(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
             }
+            val texture = TextureView(this).apply { keepScreenOn = true }
+            aspect.addView(texture, FrameLayout.LayoutParams(-1, -1))
             val player = ExoPlayer.Builder(this).build()
             player.volume = 0f
             player.repeatMode = Player.REPEAT_MODE_ONE
-            bgvPlayerView = view
+            bgvTextureView = texture
+            bgvAspectContainer = aspect
             bgvPlayer = player
-            view.player = player
-            stage.addView(view, 0, FrameLayout.LayoutParams(-1, -1))
+            stage.addView(aspect, 0, FrameLayout.LayoutParams(-1, -1))
+            player.setVideoTextureView(texture)
             player.addListener(object : Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    val ratio = if (videoSize.height == 0) 0f else
+                        videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height.toFloat()
+                    if (ratio > 0f) aspect.setAspectRatio(ratio)
+                }
                 override fun onPlayerError(error: PlaybackException) {
                     headerStatus.text = "BGV UNAVAILABLE"
                 }
@@ -972,11 +1057,12 @@ class MainActivity : Activity() {
     }
 
     private fun stopBgv() {
+        try { bgvTextureView?.let { texture -> bgvPlayer?.clearVideoTextureView(texture) } } catch (_: Exception) {}
         try { bgvPlayer?.stop() } catch (_: Exception) {}
         try { bgvPlayer?.release() } catch (_: Exception) {}
         bgvPlayer = null
-        bgvPlayerView?.player = null
-        bgvPlayerView = null
+        bgvTextureView = null
+        bgvAspectContainer = null
     }
 
     private fun showQueue() {
@@ -1120,7 +1206,11 @@ class MainActivity : Activity() {
     private fun pausePlayback() {
         try { exoPlayer?.pause() } catch (_: Exception) {}
         if (midiPlayer != null) {
-            try { midiPlayer?.pause(); midiPaused = true } catch (_: Exception) {}
+            lyricHandler.removeCallbacks(lyricHighlighter)
+            try {
+                midiPlayer?.pause()
+                midiPaused = true
+            } catch (_: Exception) {}
         }
     }
 
@@ -1180,11 +1270,13 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     private fun playVideo(song: Song) {
         numberScreenActive = false
+        tvNumberDisplay = null
         activeSong = song
         activeLyrics = ""
         stopBgv()
         stopMidi()
         safeStopVideo()
+        enterKaraokeFullscreen()
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         content.minimumHeight = resources.displayMetrics.heightPixels
         // TextureView renders reliably inside the app's scrolling shell on phones and TV.
@@ -1308,9 +1400,12 @@ class MainActivity : Activity() {
 
     private fun playMidiSong(song: Song) {
         numberScreenActive = false
+        tvNumberDisplay = null
         stopBgv()
         safeStopVideo()
         stopMidi()
+        enterKaraokeFullscreen()
+        activeLyrics = ""
         try {
             val prefs = getSharedPreferences("karaokehome", MODE_PRIVATE)
             val customSfPath = prefs.getString("custom_soundfont_path", null)
@@ -1339,7 +1434,7 @@ class MainActivity : Activity() {
             val overlay = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(18), dp(14), dp(18), dp(14))
-                setBackgroundColor(Color.argb(if (bgvUri != null) 150 else 255, 5, 6, 16))
+                setBackgroundColor(Color.argb(if (bgvUri != null) 88 else 255, 5, 6, 16))
             }
             overlay.addView(label("NOW SINGING  •  ${song.type}", 11f, true, bright))
             overlay.addView(label(song.title, 22f, true, white), lp(-1, -2, 8))
@@ -1365,9 +1460,7 @@ class MainActivity : Activity() {
             overlay.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 44, 12))
             val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             controls.addView(actionButton("Ⅱ PAUSE", panel) {
-                lyricHandler.removeCallbacks(lyricHighlighter)
-                try { player.pause() } catch (_: Exception) {}
-                lyricsPlaybackView?.text = activeLyrics
+                pausePlayback()
             }, weight())
             controls.addView(actionButton("▶ RESTART", red) {
                 try { player.stop(); player.close() } catch (_: Exception) {}
@@ -1508,6 +1601,10 @@ class MainActivity : Activity() {
 
     private fun restoreShellChrome() {
         window.decorView.systemUiVisibility = 0
+        if (!isTelevisionUi()) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        tvNumberDisplay = null
         shellHeader?.visibility = View.VISIBLE
         shellAccentLine?.visibility = View.VISIBLE
         mainNavigation?.visibility = View.VISIBLE
