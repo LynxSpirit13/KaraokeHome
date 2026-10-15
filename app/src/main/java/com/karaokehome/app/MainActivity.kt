@@ -246,6 +246,7 @@ class MainActivity : Activity() {
                     } else {
                         playEnteredNumber()
                         numberEntry = ""
+                        tvNumberDisplay?.text = "0000000"
                     }
                     return true
                 }
@@ -1556,9 +1557,10 @@ class MainActivity : Activity() {
         val view = lyricsPlaybackView ?: return
         if (events.isEmpty()) return
         val elapsed = (SystemClock.elapsedRealtime() - lyricStartedAt).coerceAtLeast(0L)
-        val active = events.indexOfLast { it.timeMs <= elapsed }.coerceAtLeast(0)
-        val first = (active - 5).coerceAtLeast(0)
-        val last = (active + 10).coerceAtMost(events.lastIndex)
+        // Do not highlight the first syllable during a MIDI intro before its event time.
+        val active = events.indexOfLast { it.timeMs <= elapsed }
+        val first = if (active < 0) 0 else (active - 5).coerceAtLeast(0)
+        val last = if (active < 0) minOf(events.lastIndex, 15) else (active + 10).coerceAtMost(events.lastIndex)
         val rendered = android.text.SpannableStringBuilder()
         for (i in first..last) {
             val chunk = events[i].text
