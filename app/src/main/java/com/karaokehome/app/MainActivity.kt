@@ -22,6 +22,7 @@ class MainActivity : Activity() {
     private val queue = mutableListOf<Song>()
     private var activeSong: Song? = null
     private var midiPlayer: MidiFilePlayer? = null
+    private var lyricUpdater: Runnable? = null
     private var midiUri: Uri? = null
     private var videoUri: Uri? = null
     private var filter = "ALL"
