@@ -735,27 +735,155 @@ class MainActivity : Activity() {
             }
             val player = MidiFilePlayer(sf.absolutePath, midi.absolutePath)
             midiPlayer = player
+            val timedLines = MidiKaraokeLyrics.parse(midi)
+            val correctedLines = getCorrectedLyrics(song)?.lines()
+                ?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
             content.removeAllViews()
             val c = card()
             c.addView(label("NOW PLAYING  •  ${song.type}", 11f, true, bright))
             c.addView(label(song.title, 20f, true, white), lp(-1, -2, 8))
-            val savedLyrics = getCorrectedLyrics(song)
-            c.addView(label(savedLyrics?.takeIf { it.isNotBlank() } ?: "MIDI instrument playback via bundled SoundFont. Embedded KAR lyric extraction is not available yet; you can save corrected lyrics for this song below.", 13f, false, if (savedLyrics.isNullOrBlank()) muted else white), lp(-1, -2, 8))
+
+            val lyricTypeface = try {
+                android.graphics.Typeface.createFromAsset(assets, "radiocanada.ttf")
+            } catch (_: Exception) {
+                android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+            }
+            val lyricPanel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                setBackgroundColor(Color.rgb(7, 8, 12))
+            }
+            val currentLyric = TextView(this).apply {
+                textSize = 25f
+                typeface = lyricTypeface
+                setTextColor(white)
+                gravity = Gravity.CENTER
+                maxLines = 2
+                minLines = 1
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+            }
+            val nextLyric = TextView(this).apply {
+                textSize = 21f
+                typeface = lyricTypeface
+                setTextColor(Color.rgb(194, 197, 207))
+                gravity = Gravity.CENTER
+                maxLines = 2
+                minLines = 1
+                setPadding(dp(4), dp(6), dp(4), dp(6))
+            }
+            lyricPanel.addView(currentLyric, lp(-1, -2))
+            lyricPanel.addView(nextLyric, lp(-1, -2, 2))
+            c.addView(lyricPanel, lp(-1, -2, 12, 8))
+
+            if (timedLines.isEmpty()) {
+                val fallback = correctedLines.joinToString("\n").ifBlank {
+                    "No timed lyrics found in this MIDI/KAR file. Use EDIT / CORRECT LYRICS to add lyrics."
+                }
+                val fallbackLines = fallback.lines().filter { it.isNotBlank() }
+                currentLyric.text = fallbackLines.getOrNull(0) ?: "♪"
+                nextLyric.text = fallbackLines.getOrNull(1) ?: "Timed lyrics are not embedded in this file"
+                currentLyric.setTextColor(if (correctedLines.isEmpty()) muted else bright)
+                headerStatus.text = "PLAYING MIDI · NO TIMED LYRICS"
+            } else {
+                currentLyric.text = "♪"
+                nextLyric.text = timedLines.getOrNull(1)?.text ?: ""
+                if (correctedLines.isNotEmpty()) {
+                    // Keep user corrections; event timing is still taken from the original MIDI/KAR.
+                    currentLyric.contentDescription = "Corrected lyrics are displayed with the embedded lyric timing."
+                }
+                headerStatus.text = "PLAYING MIDI · SYNCED LYRICS"
+            }
+
             c.addView(actionButton("EDIT / CORRECT LYRICS", Color.rgb(45, 35, 75)) { showLyricsEditor(song) }, lp(-1, 46, 10))
             c.addView(actionButton("Ⅱ PAUSE", panel) { try { player.pause() } catch (_: Exception) {} }, lp(-1, 46, 8))
             c.addView(actionButton("▶ RESTART / PLAY", red) {
                 try { player.stop(); player.close() } catch (_: Exception) {}
-                midiPlayer = null; playMidiSong(song)
+                midiPlayer = null
+                playMidiSong(song)
             }, lp(-1, 46, 8))
             c.addView(actionButton("■ STOP", panel) { stopMidi(); showLibrary() }, lp(-1, 46, 8))
             c.addView(actionButton("＋ RESERVE THIS SONG", Color.rgb(45, 20, 27)) {
                 if (queue.none { it.uri == song.uri }) queue.add(song)
-                updateHeader(); Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+                updateHeader()
+                Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
             }, lp(-1, 46, 8))
             content.addView(c)
-            player.play { runOnUiThread { headerStatus.text = "FINISHED"; try { player.close() } catch (_: Exception) {}; if (midiPlayer === player) midiPlayer = null } }
-            headerStatus.text = "PLAYING MIDI"
-        } catch (e: Exception) { message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}") }
+
+            if (timedLines.isNotEmpty()) {
+                val updater = object : Runnable {
+                    override fun run() {
+                        if (midiPlayer !== player) return
+                        try {
+                            val tick = player.currentTick
+                            var lineIndex = 0
+                            for (i in timedLines.indices) {
+                                if ((timedLines[i].segments.firstOrNull()?.tick ?: Long.MAX_VALUE) <= tick) lineIndex = i
+                                else break
+                            }
+                            val line = timedLines[lineIndex]
+                            var segmentIndex = 0
+                            for (i in line.segments.indices) {
+                                if (line.segments[i].tick <= tick) segmentIndex = i else break
+                            }
+                            val displayText = correctedLines.getOrNull(lineIndex) ?: line.text
+                            currentLyric.text = highlightedLyric(displayText, line, segmentIndex)
+                            nextLyric.text = correctedLines.getOrNull(lineIndex + 1)
+                                ?: timedLines.getOrNull(lineIndex + 1)?.text.orEmpty()
+                            if (player.isPlaying) content.postDelayed(this, 60L)
+                        } catch (_: Exception) {
+                            // A native player may be closing while the screen changes.
+                        }
+                    }
+                }
+                lyricUpdater = updater
+                content.post(updater)
+            }
+
+            player.play {
+                runOnUiThread {
+                    if (midiPlayer === player) {
+                        headerStatus.text = "FINISHED"
+                        content.removeCallbacks(lyricUpdater)
+                        lyricUpdater = null
+                        try { player.close() } catch (_: Exception) {}
+                        midiPlayer = null
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            message("Could not play this MIDI/KAR file: ${e.message ?: "unsupported file"}")
+        }
+    }
+
+    private fun highlightedLyric(
+        text: String,
+        line: MidiKaraokeLyrics.Line,
+        segmentIndex: Int
+    ): CharSequence {
+        val value = text.trim()
+        if (value.isEmpty()) return ""
+        val spans = android.text.SpannableString(value)
+        if (line.segments.isEmpty()) return spans
+        val start: Int
+        val end: Int
+        if (value == line.text) {
+            val leading = line.segments.joinToString("") { it.text }.length - line.segments.joinToString("") { it.text }.trimStart().length
+            start = (line.segments.take(segmentIndex).sumOf { it.text.length } - leading).coerceIn(0, value.length)
+            end = (start + (line.segments.getOrNull(segmentIndex)?.text?.length ?: 0)).coerceIn(start, value.length)
+        } else {
+            // For user-corrected lyrics, map the embedded lyric-event progress onto the corrected words.
+            val words = Regex("\\S+").findAll(value).toList()
+            if (words.isEmpty()) return spans
+            val word = words[(segmentIndex * words.size / line.segments.size).coerceIn(0, words.lastIndex)]
+            start = word.range.first
+            end = word.range.last + 1
+        }
+        if (end > start) {
+            spans.setSpan(android.text.style.ForegroundColorSpan(Color.rgb(255, 220, 92)), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            spans.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return spans
     }
 
     // Corrected lyrics are stored separately from the original MIDI/KAR file so the source is never overwritten.
