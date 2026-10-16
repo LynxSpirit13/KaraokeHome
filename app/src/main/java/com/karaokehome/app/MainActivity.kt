@@ -759,8 +759,9 @@ class MainActivity : Activity() {
                 typeface = lyricTypeface
                 setTextColor(white)
                 gravity = Gravity.CENTER
-                maxLines = 2
+                maxLines = 1
                 minLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(4), dp(8), dp(4), dp(8))
             }
             val nextLyric = TextView(this).apply {
@@ -830,7 +831,7 @@ class MainActivity : Activity() {
                             currentLyric.text = highlightedLyric(displayText, line, segmentIndex)
                             nextLyric.text = correctedLines.getOrNull(lineIndex + 1)
                                 ?: timedLines.getOrNull(lineIndex + 1)?.text.orEmpty()
-                            if (player.isPlaying) content.postDelayed(this, 60L)
+                            content.postDelayed(this, 60L)
                         } catch (_: Exception) {
                             // A native player may be closing while the screen changes.
                         }
