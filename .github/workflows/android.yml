@@ -2,7 +2,7 @@ name: Build KaraokeHome Android
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/timed-two-line-lyrics" ]
   workflow_dispatch:
 
 permissions:
@@ -31,6 +31,7 @@ jobs:
         run: |
           mkdir -p app/src/main/assets
           cp "reyna se.sf2" app/src/main/assets/reyna-se.sf2
+          curl -fL --retry 3 "https://raw.githubusercontent.com/google/fonts/main/ofl/radiocanada/RadioCanada%5Bwdth,wght%5D.ttf" -o app/src/main/assets/radiocanada.ttf
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
